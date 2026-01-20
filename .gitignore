@@ -1,0 +1,8 @@
+# bin
+bin/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+out/
