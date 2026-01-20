@@ -6,12 +6,16 @@ The subsystem reads through the CSV line by line (skipping the header), creates
 Incident objects for each row, and forwards them to the scheduler interface.
 
 HOW TO RUN:
-1. using VSCode
-   ./build.bat (compiles the code)
-   ./run.bat (runs compiled code)
 
-2. using InteliJ IDEA
-   run 'Main.java'
+**1. Using Terminal**
+Use .bat files
+```bash
+./build.bat    # compiles the code
+./run.bat      # runs compiled code
+```
+
+**2. Using IntelliJ IDEA:**
+Run `Main.java`
 
 3. We are using the sample event CSV file provided to us from the course page. 
 
