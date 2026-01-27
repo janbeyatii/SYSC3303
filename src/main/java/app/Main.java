@@ -2,6 +2,8 @@ package app;
 
 import fireincident.FireIncidentSubsystem;
 import fireincident.TestScheduler;
+import fireincident.Scheduler;
+import fireincident.DroneSubsystem;
 
 /**
  * Main entry point for the program.
@@ -15,7 +17,7 @@ public class Main {
             csvFilePath = args[0];
         }
 
-        System.out.println("=== Fire Incident Subsystem - Iteration 1 ===");
+        System.out.println("=== Fire Incident Subsystem - Iteration 1: Fire Incident + Scheduler + Drone ===");
         System.out.println("Reading incidents from: " + csvFilePath);
         System.out.println();
 
