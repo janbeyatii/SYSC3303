@@ -11,6 +11,11 @@ import fireincident.DroneSubsystem;
  */
 public class Main {
     public static void main(String[] args) {
+        javax.swing.SwingUtilities.invokeLater(() -> {
+            SchedulerGUI gui = new SchedulerGUI();
+            gui.setVisible(true);
+        });
+
         String csvFilePath = "data/Sample_event_file.csv";
         
         if (args.length > 0) {
@@ -27,7 +32,7 @@ public class Main {
         drone1.start();
 
         // Using a test scheduler for now (real scheduler not implemented yet)
-        TestScheduler scheduler = new TestScheduler();
+        TestScheduler Tscheduler = new TestScheduler();
 
         FireIncidentSubsystem subsystem = new FireIncidentSubsystem(csvFilePath, scheduler);
 
