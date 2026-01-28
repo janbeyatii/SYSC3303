@@ -22,7 +22,6 @@ public class Main {
         System.out.println();
 
         
-
         Scheduler scheduler = new Scheduler();
         Thread drone1 = new Thread(new DroneSubsystem(1, scheduler));
         drone1.start();
