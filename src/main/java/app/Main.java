@@ -21,6 +21,12 @@ public class Main {
         System.out.println("Reading incidents from: " + csvFilePath);
         System.out.println();
 
+        
+
+        Scheduler scheduler = new Scheduler();
+        Thread drone1 = new Thread(new DroneSubsystem(1, scheduler));
+        drone1.start();
+
         // Using a test scheduler for now (real scheduler not implemented yet)
         TestScheduler scheduler = new TestScheduler();
 
