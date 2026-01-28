@@ -43,6 +43,11 @@ Jan
 * Completion Notifications: Receives callback notifications when scheduler completes incidents
 * Input Validation: Handles header rows, empty lines, and parsing errors
 
+Samy 
+* Implemented a skeleton UI
+* Created Sequence UML Diagram
+* Created Class UML Diagram
+
 Other Components:
 ------------------------------------
 * Scheduler Subsystem: Only a TestScheduler exists for testing communication. This is a placeholder to make the Fire Incident Subsystem work without the real scheduler.
