@@ -48,6 +48,15 @@ Samy
 * Created Sequence UML Diagram
 * Created Class UML Diagram
 
+Mithushan
+* Drone Task Request: Requests tasks from the Scheduler for the drone to handle.
+* Incident Assignment: Receives incident assignments from the Scheduler.
+* Travel Simulation: Simulates the drone traveling to the incident location using Iteration 0 parameters.
+* Extinguishing Simulation: Simulates extinguishing the fire based on the severity of the incident.
+* Return Simulation: Simulates the drone returning to base after completing the task.
+* Completion Notification: Sends completion notifications back to the Scheduler after handling incidents.
+
+
 Other Components:
 ------------------------------------
 * Scheduler Subsystem: Only a TestScheduler exists for testing communication. This is a placeholder to make the Fire Incident Subsystem work without the real scheduler.
