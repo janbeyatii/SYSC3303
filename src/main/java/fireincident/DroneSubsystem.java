@@ -20,6 +20,7 @@ public class DroneSubsystem implements Runnable {
 
     @Override
     public void run() {
+        scheduler.updateDroneState(droneId, "IDLE", null);
         while (!Thread.currentThread().isInterrupted()) {
             Incident incident = scheduler.requestWork(droneId);
             if (incident == null) break;
@@ -30,16 +31,21 @@ public class DroneSubsystem implements Runnable {
                 // Simulate travel to the incident
                 double travelTime = calculateTravelTime(incident.getZoneId());
                 System.out.println("[Drone " + droneId + "] Traveling to incident. Time: " + travelTime + " seconds");
+                scheduler.updateDroneState(droneId, "EN_ROUTE", incident.getZoneId());
                 Thread.sleep((long) (travelTime * 1000));
 
                 // Simulate extinguishing the fire
                 double extinguishTime = calculateExtinguishTime(incident.getSeverity());
                 System.out.println("[Drone " + droneId + "] Extinguishing fire. Time: " + extinguishTime + " seconds");
+                scheduler.updateDroneState(droneId, "DROPPING_AGENT", incident.getZoneId());
                 Thread.sleep((long) (extinguishTime * 1000));
 
                 // Simulate return to base
                 System.out.println("[Drone " + droneId + "] Returning to base.");
+                scheduler.updateDroneState(droneId, "RETURNING", incident.getZoneId());
                 Thread.sleep((long) (travelTime * 1000));
+
+                scheduler.updateDroneState(droneId, "IDLE", null);
 
                 // Notify the scheduler of completion
                 scheduler.reportCompletion(droneId, incident);

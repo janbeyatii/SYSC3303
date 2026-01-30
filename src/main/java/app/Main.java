@@ -5,40 +5,24 @@ import fireincident.TestScheduler;
 import fireincident.Scheduler;
 import fireincident.DroneSubsystem;
 
+import javax.swing.*;
+
 /**
  * Main entry point for the program.
  * Sets everything up and starts reading incidents from the CSV file.
  */
 public class Main {
     public static void main(String[] args) {
-        javax.swing.SwingUtilities.invokeLater(() -> {
-            SchedulerGUI gui = new SchedulerGUI();
-            gui.setVisible(true);
-        });
-
-        String csvFilePath = "data/Sample_event_file.csv";
-        
-        if (args.length > 0) {
-            csvFilePath = args[0];
-        }
-
-        System.out.println("=== Fire Incident Subsystem - Iteration 1: Fire Incident + Scheduler + Drone ===");
-        System.out.println("Reading incidents from: " + csvFilePath);
-        System.out.println();
-
-        
         Scheduler scheduler = new Scheduler();
-        Thread drone1 = new Thread(new DroneSubsystem(1, scheduler));
+
+        // ADD/KEEP: start at least 1 drone for Iteration 1
+        Thread drone1 = new Thread(new DroneSubsystem(1, scheduler), "Drone-1");
         drone1.start();
 
-        // Using a test scheduler for now (real scheduler not implemented yet)
-        TestScheduler Tscheduler = new TestScheduler();
-
-        FireIncidentSubsystem subsystem = new FireIncidentSubsystem(csvFilePath, scheduler);
-
-        subsystem.processIncidents();
-
-        System.out.println();
-        System.out.println("=== Processing Complete ===");
+        // ADD: launch GUI on Swing EDT
+        SwingUtilities.invokeLater(() -> {
+            SchedulerGUI gui = new SchedulerGUI(scheduler);
+            gui.setVisible(true);
+        });
     }
 }

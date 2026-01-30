@@ -44,7 +44,11 @@ Jan
 * Input Validation: Handles header rows, empty lines, and parsing errors
 
 Samy 
-* Implemented a skeleton UI
+* Implemented a UI by
+  * Creating SchedulerGUI
+  * Creating Scheduler Listener
+  * Making changes in DroneSubsystem
+  * Making changes in Scheduler
 * Created Sequence UML Diagram
 * Created Class UML Diagram
 
