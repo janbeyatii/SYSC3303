@@ -61,3 +61,13 @@ Mithushan
 * Extinguishing Simulation: Simulates extinguishing the fire based on the severity of the incident.
 * Return Simulation: Simulates the drone returning to base after completing the task.
 * Completion Notification: Sends completion notifications back to the Scheduler after handling incidents.
+
+Iman 
+* Implemented the Scheduler
+* Builds the central communication layer
+* Receive incidents from the Fire Incident Subsystem
+* Storing or queueing incident
+* Respond to drone requests for work
+* forwarding incidents to drones
+* Route completion messages back to Fire Incident Subsystem
+
