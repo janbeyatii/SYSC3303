@@ -23,7 +23,9 @@ public class Scheduler implements SchedulerInterface {
             this.callback = callback;
         }
     }
+    //waiting incidents of FIFO queue
     private final LinkedList<Job> queue = new LinkedList<>();
+    // track assigned incidents
     private final Map<Integer, Job> inProgressByZone = new HashMap<>();
     private final List<SchedulerListener> listeners = new ArrayList<>();
     private final Map<Integer, String> droneStateById = new HashMap<>();
@@ -36,6 +38,9 @@ public class Scheduler implements SchedulerInterface {
         fireIncidentQueued(incident);
         notifyAll();
     }
+    /**
+    * this function has the drone asks for next incident and it blocks until one is available 
+    */
     public synchronized Incident requestWork(int droneId) {
         updateDroneState(droneId, "IDLE", null);
         while (queue.isEmpty()) {
@@ -52,6 +57,10 @@ public class Scheduler implements SchedulerInterface {
         fireIncidentDispatched(droneId, job.incident);
         return job.incident;
     }
+    /**
+    * this function has the drone report completion and scheduler routes it back using 
+    * callback thats stored
+    */
     public synchronized void reportCompletion(int droneId, Incident incident) {
         Job job = inProgressByZone.remove(incident.getZoneId());
         fireLog("[Scheduler] Completion from Drone " + droneId + ": " + incident);
