@@ -12,12 +12,14 @@ Use .bat files
 ```bash
 ./build.bat    # compiles the code
 ./run.bat      # runs compiled code
+./build_tests.bat   # compile tests
+./run_tests.bat     # run all unit tests
 ```
 
 **2. Using IntelliJ IDEA:**
 Run `Main.java`
 
-3. We are using the sample event CSV file provided to us from the course page. 
+4. We are using the sample event CSV file provided to us from the course page. 
 
 CSV FILE FORMAT:
 The CSV should look like this:

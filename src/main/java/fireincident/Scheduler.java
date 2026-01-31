@@ -1,11 +1,19 @@
 package fireincident;
+
 import model.Incident;
+
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
-import java.util.Map;
 import java.util.List;
-import java.util.ArrayList;
+import java.util.Map;
 
+/**
+ * Scheduler (server): receives incidents from the Fire Incident Subsystem,
+ * queues them, and dispatches work to drones via {@link #requestWork(int)}.
+ * When a drone reports completion, the scheduler notifies the original
+ * {@link IncidentCallback} and listeners.
+ */
 public class Scheduler implements SchedulerInterface {
     private static class Job {
         final Incident incident;

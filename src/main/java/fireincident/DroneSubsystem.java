@@ -2,6 +2,12 @@ package fireincident;
 
 import model.Incident;
 
+/**
+ * Drone subsystem (client): runs in its own thread, requests work from the
+ * {@link Scheduler} via {@link Scheduler#requestWork(int)}, simulates travel,
+ * dropping agent, and return, then reports completion via
+ * {@link Scheduler#reportCompletion(int, Incident)}.
+ */
 public class DroneSubsystem implements Runnable {
     private static final double CRUISE_SPEED = 10.0; // m/s
     private static final int TAKEOFF_TIME = 8;       // seconds
@@ -12,10 +18,21 @@ public class DroneSubsystem implements Runnable {
 
     private final int droneId;
     private final Scheduler scheduler;
+    /** Scale factor for sleep times (1.0 = real time; use &lt; 1.0 in tests to run fast). */
+    private final double timeScale;
 
     public DroneSubsystem(int droneId, Scheduler scheduler) {
+        this(droneId, scheduler, 1.0);
+    }
+
+    /**
+     * Constructor for tests: use timeScale &lt; 1.0 so simulation completes quickly.
+     * @param timeScale 1.0 = real time; e.g. 0.001 for tests
+     */
+    public DroneSubsystem(int droneId, Scheduler scheduler, double timeScale) {
         this.droneId = droneId;
         this.scheduler = scheduler;
+        this.timeScale = timeScale <= 0 ? 1.0 : timeScale;
     }
 
     @Override
@@ -32,18 +49,18 @@ public class DroneSubsystem implements Runnable {
                 double travelTime = calculateTravelTime(incident.getZoneId());
                 System.out.println("[Drone " + droneId + "] Traveling to incident. Time: " + travelTime + " seconds");
                 scheduler.updateDroneState(droneId, "EN_ROUTE", incident.getZoneId());
-                Thread.sleep((long) (travelTime * 1000));
+                sleepSeconds(travelTime);
 
                 // Simulate extinguishing the fire
                 double extinguishTime = calculateExtinguishTime(incident.getSeverity());
                 System.out.println("[Drone " + droneId + "] Extinguishing fire. Time: " + extinguishTime + " seconds");
                 scheduler.updateDroneState(droneId, "DROPPING_AGENT", incident.getZoneId());
-                Thread.sleep((long) (extinguishTime * 1000));
+                sleepSeconds(extinguishTime);
 
                 // Simulate return to base
                 System.out.println("[Drone " + droneId + "] Returning to base.");
                 scheduler.updateDroneState(droneId, "RETURNING", incident.getZoneId());
-                Thread.sleep((long) (travelTime * 1000));
+                sleepSeconds(travelTime);
 
                 scheduler.updateDroneState(droneId, "IDLE", null);
 
@@ -68,5 +85,10 @@ public class DroneSubsystem implements Runnable {
     private double calculateExtinguishTime(int litresRequired) {
         // Severity is stored as litres (Low=10, Moderate=20, High=30 per spec)
         return litresRequired / RELEASE_RATE; // time to release water (seconds)
+    }
+
+    private void sleepSeconds(double seconds) throws InterruptedException {
+        long ms = Math.max(1, (long) (seconds * 1000 * timeScale));
+        Thread.sleep(ms);
     }
 }

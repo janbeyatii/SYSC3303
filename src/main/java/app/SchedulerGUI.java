@@ -14,6 +14,11 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Minimal GUI for Iteration 1: load incident CSV, start simulation, and display
+ * incidents, drone states, and event log. Implements {@link SchedulerListener}
+ * to receive updates from the {@link Scheduler}.
+ */
 public class SchedulerGUI extends JFrame implements SchedulerListener {
 
     private final Scheduler scheduler;

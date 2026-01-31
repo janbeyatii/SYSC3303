@@ -3,10 +3,9 @@ package fireincident;
 import model.Incident;
 
 /**
- * Test version of scheduler for Iteration 1.
- * Just prints what it receives and immediately calls back to say it's done.
- * This lets us test Fire Incident Subsystem without waiting for real scheduler.
- * Will be replaced with actual scheduling logic in later iterations.
+ * Stub implementation of {@link SchedulerInterface} for testing the Fire
+ * Incident Subsystem in isolation. Receives an incident and immediately
+ * invokes the callback; no real scheduling or drone interaction.
  */
 public class TestScheduler implements SchedulerInterface {
     @Override

@@ -3,9 +3,9 @@ package fireincident;
 import model.Incident;
 
 /**
- * Interface that scheduler needs to implement.
- * The Fire Incident Subsystem uses this to send incidents to scheduler.
- * The callback lets the scheduler notify when it's done.
+ * Interface implemented by the Scheduler. The Fire Incident Subsystem sends
+ * incidents through this interface; the callback is invoked when the incident
+ * has been completed (e.g. by a drone).
  */
 public interface SchedulerInterface {
     void receiveIncident(Incident incident, IncidentCallback callback);
