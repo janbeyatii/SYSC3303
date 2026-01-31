@@ -29,9 +29,9 @@ Fields:
 * Time: When the incident happened (string)
 * Zone ID: Which zone (integer)
 * Event type: What happened (string, like "FIRE_DETECTED" or "DRONE_REQUEST")
-* Severity: How bad it is - can be a number (1-5) or word like "High", "Moderate", "Low"
+* Severity: Amount of water/foam needed (Low=10 L, Moderate=20 L, High=30 L) Use words "High", "Moderate", "Low" or litres 10, 20, 30.
 
-The severity gets converted: High=5, Moderate=3, Low=1
+Severity is stored as litres: High=30, Moderate=20, Low=10
 
 ITERATION 1 STATUS:
 
@@ -59,8 +59,3 @@ Mithushan
 * Extinguishing Simulation: Simulates extinguishing the fire based on the severity of the incident.
 * Return Simulation: Simulates the drone returning to base after completing the task.
 * Completion Notification: Sends completion notifications back to the Scheduler after handling incidents.
-
-
-Other Components:
-------------------------------------
-* Scheduler Subsystem: Only a TestScheduler exists for testing communication. This is a placeholder to make the Fire Incident Subsystem work without the real scheduler.

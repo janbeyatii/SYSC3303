@@ -37,8 +37,18 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
     private final Map<String, Integer> incidentRowByKey = new HashMap<>();
     private final Map<Integer, Integer> droneRowById = new HashMap<>();
 
+    /** Default CSV path shown in the file field (from command line or default). */
+    private final String defaultCsvPath;
+
     public SchedulerGUI(Scheduler scheduler) {
+        this(scheduler, "data/Sample_event_file.csv");
+    }
+
+    public SchedulerGUI(Scheduler scheduler, String defaultCsvPath) {
         this.scheduler = scheduler;
+        this.defaultCsvPath = defaultCsvPath != null && !defaultCsvPath.isEmpty()
+                ? defaultCsvPath.trim()
+                : "data/Sample_event_file.csv";
 
         // ADD: register GUI as a listener
         this.scheduler.addListener(this);
@@ -67,7 +77,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         left.add(countsLabel);
 
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        fileField = new JTextField("data/Sample_event_file.csv", 28);
+        fileField = new JTextField(defaultCsvPath, 28);
         fileField.setEditable(false);
 
         loadFileBtn = new JButton("Load CSV...");

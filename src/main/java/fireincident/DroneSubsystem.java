@@ -65,9 +65,8 @@ public class DroneSubsystem implements Runnable {
         return TAKEOFF_TIME + ACCEL_TIME + cruiseTime + DECEL_TIME + LANDING_TIME;
     }
 
-    private double calculateExtinguishTime(int severity) {
-        // Assume severity corresponds to the amount of water needed (units: liters)
-        double waterNeeded = severity * 100.0;
-        return waterNeeded / RELEASE_RATE; // time to release water
+    private double calculateExtinguishTime(int litresRequired) {
+        // Severity is stored as litres (Low=10, Moderate=20, High=30 per spec)
+        return litresRequired / RELEASE_RATE; // time to release water (seconds)
     }
 }

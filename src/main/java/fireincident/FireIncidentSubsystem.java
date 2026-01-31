@@ -88,31 +88,30 @@ public class FireIncidentSubsystem implements IncidentCallback {
     }
 
     /**
-     * Converts severity to a number.
-     * Handles both numeric values and text like "High", "Moderate", "Low"
+     * Converts severity to litres of water/foam needed (per spec: Low=10 L, Moderate=20 L, High=30 L).
+     * Accepts words "High", "Moderate", "Low" or numeric litres 10, 20, 30.
      */
     private int parseSeverity(String severityStr) {
-        // First try parsing it as a number
+        String normalized = severityStr.trim().toLowerCase();
+        switch (normalized) {
+            case "high":
+                return 30;
+            case "moderate":
+                return 20;
+            case "low":
+                return 10;
+            default:
+                break;
+        }
         try {
-            int severity = Integer.parseInt(severityStr);
-            if (severity < 1 || severity > 5) {
-                throw new IllegalArgumentException("Severity must be between 1 and 5, got: " + severity);
+            int litres = Integer.parseInt(severityStr.trim());
+            if (litres == 10 || litres == 20 || litres == 30) {
+                return litres;
             }
-            return severity;
+            throw new IllegalArgumentException("Severity must be 10, 20, or 30 (litres), or High/Moderate/Low, got: " + severityStr);
         } catch (NumberFormatException e) {
-            // If it's not a number, check if it's a word
-            String normalized = severityStr.trim().toLowerCase();
-            switch (normalized) {
-                case "high":
-                    return 5;
-                case "moderate":
-                    return 3;
-                case "low":
-                    return 1;
-                default:
-                    throw new IllegalArgumentException("Unknown severity value: " + severityStr + 
-                            ". Expected integer (1-5) or string (High, Moderate, Low)");
-            }
+            throw new IllegalArgumentException("Unknown severity value: " + severityStr +
+                    ". Expected High (30 L), Moderate (20 L), Low (10 L), or 10/20/30");
         }
     }
 
