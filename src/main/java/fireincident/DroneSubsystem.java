@@ -14,7 +14,11 @@ public class DroneSubsystem implements Runnable {
     private static final int LANDING_TIME = 10;      // seconds
     private static final int ACCEL_TIME = 3;         // seconds
     private static final int DECEL_TIME = 3;         // seconds
+    private static final double NOZZLE_OPEN_TIME = 0.5// seconds 
+    private static final double NOZZLE_CLOSE_TIME = 0.5// seconds 
     private static final double RELEASE_RATE = 190.0 / 60.0; // L/s
+    private static final double MAX_AGENT = 100;
+    private static final double MAX_BATTERY = 100;
 
     private final int droneId;
     private final Scheduler scheduler;
