@@ -14,8 +14,8 @@ public class DroneSubsystem implements Runnable {
     private static final int LANDING_TIME = 10;      // seconds
     private static final int ACCEL_TIME = 3;         // seconds
     private static final int DECEL_TIME = 3;         // seconds
-    private static final double NOZZLE_OPEN_TIME = 0.5// seconds 
-    private static final double NOZZLE_CLOSE_TIME = 0.5// seconds 
+    private static final double NOZZLE_OPEN_TIME = 0.5; // seconds 
+    private static final double NOZZLE_CLOSE_TIME = 0.5; // seconds 
     private static final double RELEASE_RATE = 190.0 / 60.0; // L/s
     private static final double MAX_AGENT = 100;
     private static final double MAX_BATTERY = 900;
@@ -56,25 +56,27 @@ public class DroneSubsystem implements Runnable {
                 double travelTime = calculateTravelTime(incident.getZoneId());
                 System.out.println("[Drone " + droneId + "] Traveling to incident. Time: " + travelTime + " seconds");
                 scheduler.updateDroneState(droneId, "EN_ROUTE", incident.getZoneId());
-                sleepSeconds(travelTime);
+          
                 useBattery(travelTime);
-
-                // Simulate extinguishing the fire
-                double extinguishTime = calculateExtinguishTime(incident.getSeverity());
-                System.out.println("[Drone " + droneId + "] Extinguishing fire. Time: " + extinguishTime + " seconds");
-                scheduler.updateDroneState(droneId, "DROPPING_AGENT", incident.getZoneId());
-                sleepSeconds(extinguishTime);
-
-                // Simulate return to base
-                System.out.println("[Drone " + droneId + "] Returning to base.");
-                scheduler.updateDroneState(droneId, "RETURNING", incident.getZoneId());
                 sleepSeconds(travelTime);
-
+                scheduler.reportArrival(droneId, incident);
+                
+                // Simulate extinguishing the fire
+                int litresNeeded = incident.getSeverity();               
+                int litresUsed = Math.min(litresNeeded, agentRemaining);   
+                agentRemaining -= litresUsed;                             
+                double extinguishTime = calculateExtinguishTime(litresUsed);
+                System.out.println("[Drone " + droneId + "] Extinguishing fire. Used: "
+                        + litresUsed + "L. Time:" + extinguishTime + "seconds");
+                scheduler.updateDroneState(droneId, "EXTINGUISHING", incident.getZoneId());
+                
+                useBattery(extinguishTime);
+                sleepSeconds(extinguishTime);
                 scheduler.updateDroneState(droneId, "IDLE", null);
 
                 // Notify the scheduler of completion
                 scheduler.reportCompletion(droneId, incident);
-                System.out.println("[Drone " + droneId + "] Incident completed: " + incident);
+                System.out.println("[Drone " + droneId + "] Incident completed:" + incident);
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -90,9 +92,13 @@ public class DroneSubsystem implements Runnable {
         return TAKEOFF_TIME + ACCEL_TIME + cruiseTime + DECEL_TIME + LANDING_TIME;
     }
 
-    private double calculateExtinguishTime(int litresRequired) {
+    private double calculateExtinguishTime(int litresUsed) {
         // Severity is stored as litres (Low=10, Moderate=20, High=30 per spec)
-        return litresRequired / RELEASE_RATE; // time to release water (seconds)
+        return NOZZLE_OPEN_TIME + (litresUsed / RELEASE_RATE) + NOZZLE_CLOSE_TIME;
+    }
+
+    private void useBattery(double seconds){
+        batteryRemaining = Math.max(0, batteryRemaining - seconds);   
     }
 
     private void sleepSeconds(double seconds) throws InterruptedException {
