@@ -18,8 +18,11 @@ public class DroneSubsystem implements Runnable {
     private static final double NOZZLE_CLOSE_TIME = 0.5// seconds 
     private static final double RELEASE_RATE = 190.0 / 60.0; // L/s
     private static final double MAX_AGENT = 100;
-    private static final double MAX_BATTERY = 100;
+    private static final double MAX_BATTERY = 900;
 
+    private int agentRemaining = MAX_AGENT;
+    private double batteryRemaining = MAX_BATTERY;
+    
     private final int droneId;
     private final Scheduler scheduler;
     /** Scale factor for sleep times (1.0 = real time; use &lt; 1.0 in tests to run fast). */
@@ -54,6 +57,7 @@ public class DroneSubsystem implements Runnable {
                 System.out.println("[Drone " + droneId + "] Traveling to incident. Time: " + travelTime + " seconds");
                 scheduler.updateDroneState(droneId, "EN_ROUTE", incident.getZoneId());
                 sleepSeconds(travelTime);
+                useBattery(travelTime);
 
                 // Simulate extinguishing the fire
                 double extinguishTime = calculateExtinguishTime(incident.getSeverity());
