@@ -151,5 +151,13 @@ public class Scheduler implements SchedulerInterface {
     private void fireLog(String message){
         for (SchedulerListener l : listeners) l.onLog(message);
     }
+    public synchronized void reportArrival(int droneId, Incident incident){
+        fireLog("[Scheduler] Drone" + droneId + "arrived at zone" + incident.getZoneId());
+        updateDroneState(droneId, "ARRIVED", incident.getZoneId());
+    }
+    public synchronized void reportReturnToBase(int droneId){
+        fireLog("[Scheduler] Drone" + droneId + "returned to base");
+        updateDroneState(droneId, "IDLE", null);
+    }
 }
 
