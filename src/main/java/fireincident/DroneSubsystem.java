@@ -19,7 +19,7 @@ public class DroneSubsystem implements Runnable {
     private static final double RELEASE_RATE = 190.0 / 60.0; // L/s
     private static final double MAX_AGENT = 100;
     private static final double MAX_BATTERY = 900;
-    private int agentRemaining = MAX_AGENT;
+    private int agentRemaining = (int) MAX_AGENT;
     private double batteryRemaining = MAX_BATTERY;
     
     private final int droneId;
@@ -71,11 +71,21 @@ public class DroneSubsystem implements Runnable {
                 
                 useBattery(extinguishTime);
                 sleepSeconds(extinguishTime);
-                scheduler.updateDroneState(droneId, "IDLE", null);
 
-                // Notify the scheduler of completion
                 scheduler.reportCompletion(droneId, incident);
-                System.out.println("[Drone " + droneId + "] Incident completed:" + incident);
+                System.out.println("[Drone " + droneId + "] Incident completed: " + incident);
+
+                // Simulate return to base
+                double returnTime = calculateTravelTime(incident.getZoneId());
+                System.out.println("[Drone " + droneId + "] Returning to base. Time: " + returnTime + " seconds");
+                scheduler.updateDroneState(droneId, DroneState.RETURNING.name(), null);
+                useBattery(returnTime);
+                sleepSeconds(returnTime);
+                scheduler.reportReturnToBase(droneId);
+                agentRemaining = (int) MAX_AGENT;
+                batteryRemaining = MAX_BATTERY;
+
+                scheduler.updateDroneState(droneId, "IDLE", null);
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
