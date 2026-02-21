@@ -71,3 +71,18 @@ Iman
 * forwarding incidents to drones
 * Route completion messages back to Fire Incident Subsystem
 
+ITERATION 2 STATUS: 
+
+
+
+
+
+Iman
+* Implement drone states idle, en route, extinguishing, returning
+* Simulate travel time, agent drop time, and battery usage using Iteration 0 values
+* Handle partial agent usage and continuing to another zone if possible
+* Notify scheduler on arrival, completion, and return
+*  Drone state machine diagram
+*  Drone subsystem UML updates
+*  Verified calculations for timing and agent usage
+
