@@ -15,9 +15,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Minimal GUI for Iteration 1: load incident CSV, start simulation, and display
- * incidents, drone states, and event log. Implements {@link SchedulerListener}
- * to receive updates from the {@link Scheduler}.
+ * GUI for Scheduler: load incident CSV, start simulation, and display
+ * drone current state, active fire count, current zone being serviced,
+ * and event log. Implements {@link SchedulerListener} for live updates.
  */
 public class SchedulerGUI extends JFrame implements SchedulerListener {
 
@@ -58,7 +58,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         // ADD: register GUI as a listener
         this.scheduler.addListener(this);
 
-        setTitle("Firefighting Drone Swarm - Iteration 1");
+        setTitle("Firefighting Drone Swarm - Scheduler");
         setSize(950, 650);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout(8, 8));
@@ -76,7 +76,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
 
         JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT));
         systemStatus = new JLabel("System Status: IDLE");
-        countsLabel = new JLabel("Queue: 0 | In-Progress: 0");
+        countsLabel = new JLabel("Queue: 0 | In-Progress: 0 | Active fires: 0");
         left.add(systemStatus);
         left.add(Box.createHorizontalStrut(12));
         left.add(countsLabel);
@@ -189,7 +189,9 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
     }
 
     private void refreshCounts(){
-        countsLabel.setText("Queue: " + scheduler.getQueueSize() + " | In-Progress: " + scheduler.getInProgressCount());
+        int queue = scheduler.getQueueSize();
+        int inProgress = scheduler.getInProgressCount();
+        countsLabel.setText("Queue: " + queue + " | In-Progress: " + inProgress + " | Active fires: " + (queue + inProgress));
     }
 
     private void log(String msg){
@@ -202,7 +204,6 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
     }
 
     private String incidentKey(Incident i){
-        // basic unique key for Iteration 1: time + zone + type
         return i.getTime() + "|" + i.getZoneId() + "|" + i.getEventType();
     }
 
@@ -269,7 +270,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
             } else {
                 if (state != null) droneModel.setValueAt(state, row, 1);
                 if (zoneId != null) droneModel.setValueAt(zoneId, row, 2);
-                if (zoneId == null && "IDLE".equals(state)) droneModel.setValueAt("-", row, 2);
+                else droneModel.setValueAt("-", row, 2);
                 droneModel.setValueAt(timestamp(), row, 3);
             }
         });
