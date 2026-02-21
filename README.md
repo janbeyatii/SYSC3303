@@ -86,3 +86,18 @@ Iman
 *  Drone subsystem UML updates
 *  Verified calculations for timing and agent usage
 
+Samy
+*  Implemented scheduling logic
+*  Added FIFO queue management for fire incidents 
+*  Implemented the handling of dispatch and completion
+*  Updated scheduler UML Class Diagram
+*  Updated scheduler UML State Machine
+*  verified through testing
+
+Mithushan
+*  Updated Testing for Iteration 2: Expanded and updated test cases to ensure all new functionalities and state transitions introduced in Iteration 2 are thoroughly tested.
+*  SchedulerTest: Verified fire state transitions (PENDING, ASSIGNED, COMPLETED). Tested scheduler state machine transitions (IDLE, HAS_PENDING, DRONE_BUSY).
+*  DroneSubsystemTest: Tested drone state transitions (IDLE, EN_ROUTE, EXTINGUISHING, RETURNING). Simulated travel time, extinguishing, and return processes. Verified partial agent usage and handling of multiple incidents.
+*  FireIncidentSubsystemTest: Tested CSV parsing for fire incidents, including severity levels and invalid lines. Verified incidents are sent to the scheduler and callbacks are invoked on completion.
+*  IntegrationTest: Validated the integration of Scheduler, DroneSubsystem, and FireIncidentSubsystem. Ensured round-trip communication and timing correctness for multiple incidents.
+*  State Machine Testing: Ensured all state transitions for Scheduler, DroneSubsystem, and FireIncidentSubsystem were exercised through unit and integration tests.
