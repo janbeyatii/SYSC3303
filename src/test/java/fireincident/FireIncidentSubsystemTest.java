@@ -26,7 +26,6 @@ public class FireIncidentSubsystemTest {
     @Before
     public void setUp() {
         receivedIncidents = new ArrayList<>();
-        completedIncidents = new ArrayList<>();
         mockScheduler = new SchedulerInterface() {
             @Override
             public void receiveIncident(Incident incident, IncidentCallback callback) {
@@ -81,6 +80,24 @@ public class FireIncidentSubsystemTest {
     }
 
     @Test
+    public void processIncidentsHandlesInvalidLinesGracefully() throws IOException {
+        File csv = folder.newFile("incidents.csv");
+        try (FileWriter w = new FileWriter(csv)) {
+            w.write("Time,Zone ID,Event type,Severity\n");
+            w.write("14:03:15,3,FIRE_DETECTED,High\n");
+            w.write("Invalid,Line,Here\n"); // Invalid line
+            w.write("14:10:00,7,DRONE_REQUEST,Moderate\n");
+        }
+
+        FireIncidentSubsystem fis = new FireIncidentSubsystem(csv.getPath(), mockScheduler);
+        fis.processIncidents();
+
+        assertEquals(2, receivedIncidents.size());
+        assertEquals("14:03:15", receivedIncidents.get(0).getTime());
+        assertEquals("14:10:00", receivedIncidents.get(1).getTime());
+    }
+
+    @Test
     public void onIncidentCompletedCalledByMock() throws IOException {
         completedIncidents.clear();
         SchedulerInterface withCallback = (incident, callback) -> {
@@ -98,6 +115,19 @@ public class FireIncidentSubsystemTest {
         };
         fis.processIncidents();
         assertEquals(1, completedIncidents.size());
+    }
+
+    @Test
+    public void processIncidentsHandlesEmptyCsv() throws IOException {
+        File csv = folder.newFile("empty.csv");
+        try (FileWriter w = new FileWriter(csv)) {
+            w.write("Time,Zone ID,Event type,Severity\n"); // Header only
+        }
+
+        FireIncidentSubsystem fis = new FireIncidentSubsystem(csv.getPath(), mockScheduler);
+        fis.processIncidents();
+
+        assertTrue(receivedIncidents.isEmpty());
     }
 
     private String createCsvWithOneLine() throws IOException {
