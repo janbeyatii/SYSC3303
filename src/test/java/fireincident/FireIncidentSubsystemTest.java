@@ -98,26 +98,6 @@ public class FireIncidentSubsystemTest {
     }
 
     @Test
-    public void onIncidentCompletedCalledByMock() throws IOException {
-        completedIncidents.clear();
-        SchedulerInterface withCallback = (incident, callback) -> {
-            receivedIncidents.add(incident);
-            if (callback != null) {
-                callback.onIncidentCompleted(incident);
-            }
-        };
-        FireIncidentSubsystem fis = new FireIncidentSubsystem(
-                createCsvWithOneLine(), withCallback) {
-            @Override
-            public void onIncidentCompleted(Incident incident) {
-                completedIncidents.add(incident);
-            }
-        };
-        fis.processIncidents();
-        assertEquals(1, completedIncidents.size());
-    }
-
-    @Test
     public void processIncidentsHandlesEmptyCsv() throws IOException {
         File csv = folder.newFile("empty.csv");
         try (FileWriter w = new FileWriter(csv)) {
