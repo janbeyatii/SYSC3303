@@ -203,15 +203,11 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         return new SimpleDateFormat("HH:mm:ss").format(new Date());
     }
 
-    private String incidentKey(Incident i){
-        return i.getTime() + "|" + i.getZoneId() + "|" + i.getEventType();
-    }
-
     // SchedulerListener callbacks (these can be called from non-GUI threads)
     @Override
     public void onIncidentQueued(Incident incident){
         SwingUtilities.invokeLater(() -> {
-            String key = incidentKey(incident);
+            String key = incident.getKey();
             if (!incidentRowByKey.containsKey(key)) {
                 int row = incidentModel.getRowCount();
                 incidentModel.addRow(new Object[]{
@@ -231,7 +227,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
     @Override
     public void onIncidentDispatched(int droneId, Incident incident){
         SwingUtilities.invokeLater(() -> {
-            String key = incidentKey(incident);
+            String key = incident.getKey();
             Integer row = incidentRowByKey.get(key);
             if (row != null) {
                 incidentModel.setValueAt("DISPATCHED", row, 4);
@@ -244,7 +240,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
     @Override
     public void onIncidentCompleted(int droneId, Incident incident){
         SwingUtilities.invokeLater(() -> {
-            String key = incidentKey(incident);
+            String key = incident.getKey();
             Integer row = incidentRowByKey.get(key);
             if (row != null) {
                 incidentModel.setValueAt("COMPLETED", row, 4);

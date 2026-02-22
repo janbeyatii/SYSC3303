@@ -1,0 +1,33 @@
+Jan
+* CSV File Reading: Reads fire incidents from CSV file
+* Line Parsing: Parses each CSV line into structured data
+*  Data Objects: Creates Incident objects with time, zoneId, eventType, severity
+* Sending to Scheduler: Sends incident objects to scheduler via SchedulerInterface
+* Completion Notifications: Receives callback notifications when scheduler completes incidents
+* Input Validation: Handles header rows, empty lines, and parsing errors
+
+Samy 
+* Implemented a UI by
+  * Creating SchedulerGUI
+  * Creating Scheduler Listener
+  * Making changes in DroneSubsystem
+  * Making changes in Scheduler
+* Created Sequence UML Diagram
+* Created Class UML Diagram
+
+Mithushan
+* Drone Task Request: Requests tasks from the Scheduler for the drone to handle.
+* Incident Assignment: Receives incident assignments from the Scheduler.
+* Travel Simulation: Simulates the drone traveling to the incident location using Iteration 0 parameters.
+* Extinguishing Simulation: Simulates extinguishing the fire based on the severity of the incident.
+* Return Simulation: Simulates the drone returning to base after completing the task.
+* Completion Notification: Sends completion notifications back to the Scheduler after handling incidents.
+
+Iman 
+* Implemented the Scheduler
+* Builds the central communication layer
+* Receive incidents from the Fire Incident Subsystem
+* Storing or queueing incident
+* Respond to drone requests for work
+* forwarding incidents to drones
+* Route completion messages back to Fire Incident Subsystem

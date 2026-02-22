@@ -43,7 +43,7 @@ public class DroneSubsystem implements Runnable {
 
     @Override
     public void run() {
-        scheduler.updateDroneState(droneId, "IDLE", null);
+        scheduler.updateDroneState(droneId, DroneState.IDLE.name(), null);
         while (!Thread.currentThread().isInterrupted()) {
             Incident incident = scheduler.requestWork(droneId);
             if (incident == null) break;
@@ -54,7 +54,7 @@ public class DroneSubsystem implements Runnable {
                 // Simulate travel to the incident
                 double travelTime = calculateTravelTime(incident.getZoneId());
                 System.out.println("[Drone " + droneId + "] Traveling to incident. Time: " + travelTime + " seconds");
-                scheduler.updateDroneState(droneId, "EN_ROUTE", incident.getZoneId());
+                scheduler.updateDroneState(droneId, DroneState.EN_ROUTE.name(), incident.getZoneId());
           
                 useBattery(travelTime);
                 sleepSeconds(travelTime);
@@ -67,7 +67,7 @@ public class DroneSubsystem implements Runnable {
                 double extinguishTime = calculateExtinguishTime(litresUsed);
                 System.out.println("[Drone " + droneId + "] Extinguishing fire. Used: "
                         + litresUsed + "L. Time:" + extinguishTime + "seconds");
-                scheduler.updateDroneState(droneId, "EXTINGUISHING", incident.getZoneId());
+                scheduler.updateDroneState(droneId, DroneState.EXTINGUISHING.name(), incident.getZoneId());
                 
                 useBattery(extinguishTime);
                 sleepSeconds(extinguishTime);
@@ -85,7 +85,7 @@ public class DroneSubsystem implements Runnable {
                 agentRemaining = (int) MAX_AGENT;
                 batteryRemaining = MAX_BATTERY;
 
-                scheduler.updateDroneState(droneId, "IDLE", null);
+                scheduler.updateDroneState(droneId, DroneState.IDLE.name(), null);
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();

@@ -12,7 +12,8 @@ java -cp "%CP%" org.junit.runner.JUnitCore ^
   model.IncidentTest ^
   fireincident.SchedulerTest ^
   fireincident.FireIncidentSubsystemTest ^
-  fireincident.DroneSubsystemTest
+  fireincident.DroneSubsystemTest ^
+  fireincident.IntegrationTest
 
 echo.
 echo Exit code: %ERRORLEVEL%

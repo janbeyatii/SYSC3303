@@ -35,69 +35,10 @@ Fields:
 
 Severity is stored as litres: High=30, Moderate=20, Low=10
 
-ITERATION 1 STATUS:
+## Tests
 
-Jan
-* CSV File Reading: Reads fire incidents from CSV file
-* Line Parsing: Parses each CSV line into structured data
-*  Data Objects: Creates Incident objects with time, zoneId, eventType, severity
-* Sending to Scheduler: Sends incident objects to scheduler via SchedulerInterface
-* Completion Notifications: Receives callback notifications when scheduler completes incidents
-* Input Validation: Handles header rows, empty lines, and parsing errors
-
-Samy 
-* Implemented a UI by
-  * Creating SchedulerGUI
-  * Creating Scheduler Listener
-  * Making changes in DroneSubsystem
-  * Making changes in Scheduler
-* Created Sequence UML Diagram
-* Created Class UML Diagram
-
-Mithushan
-* Drone Task Request: Requests tasks from the Scheduler for the drone to handle.
-* Incident Assignment: Receives incident assignments from the Scheduler.
-* Travel Simulation: Simulates the drone traveling to the incident location using Iteration 0 parameters.
-* Extinguishing Simulation: Simulates extinguishing the fire based on the severity of the incident.
-* Return Simulation: Simulates the drone returning to base after completing the task.
-* Completion Notification: Sends completion notifications back to the Scheduler after handling incidents.
-
-Iman 
-* Implemented the Scheduler
-* Builds the central communication layer
-* Receive incidents from the Fire Incident Subsystem
-* Storing or queueing incident
-* Respond to drone requests for work
-* forwarding incidents to drones
-* Route completion messages back to Fire Incident Subsystem
-
-ITERATION 2 STATUS: 
-
-
-
-
-
-Iman
-* Implement drone states idle, en route, extinguishing, returning
-* Simulate travel time, agent drop time, and battery usage using Iteration 0 values
-* Handle partial agent usage and continuing to another zone if possible
-* Notify scheduler on arrival, completion, and return
-*  Drone state machine diagram
-*  Drone subsystem UML updates
-*  Verified calculations for timing and agent usage
-
-Samy
-*  Implemented scheduling logic
-*  Added FIFO queue management for fire incidents 
-*  Implemented the handling of dispatch and completion
-*  Updated scheduler UML Class Diagram
-*  Updated scheduler UML State Machine
-*  verified through testing
-
-Mithushan
-*  Updated Testing for Iteration 2: Expanded and updated test cases to ensure all new functionalities and state transitions introduced in Iteration 2 are thoroughly tested.
-*  SchedulerTest: Verified fire state transitions (PENDING, ASSIGNED, COMPLETED). Tested scheduler state machine transitions (IDLE, HAS_PENDING, DRONE_BUSY).
-*  DroneSubsystemTest: Tested drone state transitions (IDLE, EN_ROUTE, EXTINGUISHING, RETURNING). Simulated travel time, extinguishing, and return processes. Verified partial agent usage and handling of multiple incidents.
-*  FireIncidentSubsystemTest: Tested CSV parsing for fire incidents, including severity levels and invalid lines. Verified incidents are sent to the scheduler and callbacks are invoked on completion.
-*  IntegrationTest: Validated the integration of Scheduler, DroneSubsystem, and FireIncidentSubsystem. Ensured round-trip communication and timing correctness for multiple incidents.
-*  State Machine Testing: Ensured all state transitions for Scheduler, DroneSubsystem, and FireIncidentSubsystem were exercised through unit and integration tests.
+- **IncidentTest** – constructor/getters, toString, severity as litres (10, 20, 30)
+- **SchedulerTest** – fire states (PENDING, ASSIGNED, COMPLETED), scheduler states (IDLE, HAS_PENDING, DRONE_BUSY), queue/in-progress counts
+- **FireIncidentSubsystemTest** – reads CSV and sends to scheduler, severity as words or numbers, skips bad lines and empty files
+- **DroneSubsystemTest** – drone states (IDLE, EN_ROUTE, EXTINGUISHING, RETURNING), partial agent use, multiple incidents in a row
+- **IntegrationTest** – full run with scheduler + drone + fire subsystem; multiple incidents finish in order and callbacks fire

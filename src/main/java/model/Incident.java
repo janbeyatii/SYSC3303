@@ -35,6 +35,11 @@ public class Incident {
         return severity;
     }
 
+    /** Unique key for this incident (time|zone|type). Used for tracking and GUI row lookup. */
+    public String getKey() {
+        return getTime() + "|" + getZoneId() + "|" + getEventType();
+    }
+
     @Override
     public String toString() {
         return "Incident{" +

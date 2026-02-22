@@ -41,7 +41,7 @@ public class Scheduler implements SchedulerInterface {
     @Override
     public synchronized void receiveIncident(Incident incident, IncidentCallback callback) {
         queue.addLast(new Job(incident, callback));
-        fireStates.put(incidentKey(incident), FireState.PENDING);
+        fireStates.put(incident.getKey(), FireState.PENDING);
         if(!inProgressByZone.isEmpty()){
             schedulerState = SchedulerState.DRONE_BUSY;
         } else if(queue.isEmpty()){
@@ -58,7 +58,7 @@ public class Scheduler implements SchedulerInterface {
      * this function has the drone asks for next incident and it blocks until one is available
      */
     public synchronized Incident requestWork(int droneId) {
-        updateDroneState(droneId, "IDLE", null);
+        updateDroneState(droneId, DroneState.IDLE.name(), null);
         while(queue.isEmpty()){
             schedulerState = SchedulerState.WAITING_FOR_INCIDENT;
             try {
@@ -71,7 +71,7 @@ public class Scheduler implements SchedulerInterface {
         Job job = queue.removeFirst();
         inProgressByZone.clear();
         inProgressByZone.put(job.incident.getZoneId(), job);
-        fireStates.put(incidentKey(job.incident), FireState.ASSIGNED);
+        fireStates.put(job.incident.getKey(), FireState.ASSIGNED);
         schedulerState = SchedulerState.DRONE_BUSY;
         fireLog("[Scheduler] Dispatched incident to Drone " + droneId + ": " + job.incident);
         fireIncidentDispatched(droneId, job.incident);
@@ -84,7 +84,7 @@ public class Scheduler implements SchedulerInterface {
      */
     public synchronized void reportCompletion(int droneId, Incident incident) {
         Job job = inProgressByZone.remove(incident.getZoneId());
-        fireStates.put(incidentKey(incident), FireState.COMPLETED);
+        fireStates.put(incident.getKey(), FireState.COMPLETED);
         fireLog("[Scheduler] Completion from Drone " + droneId + ": " + incident);
         fireIncidentCompleted(droneId, incident);
         if (job != null && job.callback != null) {
@@ -120,15 +120,11 @@ public class Scheduler implements SchedulerInterface {
     }
 
     public synchronized FireState getFireState(Incident incident){
-        return fireStates.get(incidentKey(incident));
+        return fireStates.get(incident.getKey());
     }
 
     public synchronized SchedulerState getSchedulerState(){
         return schedulerState;
-    }
-
-    private String incidentKey(Incident i){
-        return i.getTime() + "|" + i.getZoneId() + "|" + i.getEventType();
     }
 
     //Helper classes
@@ -157,7 +153,7 @@ public class Scheduler implements SchedulerInterface {
     }
     public synchronized void reportReturnToBase(int droneId){
         fireLog("[Scheduler] Drone" + droneId + "returned to base");
-        updateDroneState(droneId, "IDLE", null);
+        updateDroneState(droneId, DroneState.IDLE.name(), null);
     }
 }
 

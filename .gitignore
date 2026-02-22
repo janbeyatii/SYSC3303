@@ -6,3 +6,4 @@ bin/
 .vscode/
 *.iml
 out/
+target/

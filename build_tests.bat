@@ -20,7 +20,8 @@ javac -cp "%CP%" -d bin ^
   src/test/java/model/IncidentTest.java ^
   src/test/java/fireincident/SchedulerTest.java ^
   src/test/java/fireincident/FireIncidentSubsystemTest.java ^
-  src/test/java/fireincident/DroneSubsystemTest.java
+  src/test/java/fireincident/DroneSubsystemTest.java ^
+  src/test/java/fireincident/IntegrationTest.java
 
 if %ERRORLEVEL% EQU 0 (
     echo Test build successful.
