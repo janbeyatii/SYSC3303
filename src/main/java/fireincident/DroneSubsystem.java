@@ -4,9 +4,8 @@ import model.Incident;
 
 /**
  * Drone subsystem (client): runs in its own thread, requests work from the
- * {@link Scheduler} via {@link Scheduler#requestWork(int)}, simulates travel,
- * dropping agent, and return, then reports completion via
- * {@link Scheduler#reportCompletion(int, Incident)}.
+ * scheduler via {@link IDroneSchedulerChannel}, simulates travel, dropping agent,
+ * and return, then reports completion. The channel may be in-process or UDP.
  */
 public class DroneSubsystem implements Runnable {
     private static final double CRUISE_SPEED = 10.0; // m/s
@@ -23,29 +22,39 @@ public class DroneSubsystem implements Runnable {
     private double batteryRemaining = MAX_BATTERY;
     
     private final int droneId;
-    private final Scheduler scheduler;
+    private final IDroneSchedulerChannel channel;
     /** Scale factor for sleep times (1.0 = real time; use &lt; 1.0 in tests to run fast). */
     private final double timeScale;
 
-    public DroneSubsystem(int droneId, Scheduler scheduler) {
-        this(droneId, scheduler, 1.0);
+    public DroneSubsystem(int droneId, IDroneSchedulerChannel channel) {
+        this(droneId, channel, 1.0);
     }
 
     /**
      * Constructor for tests: use timeScale &lt; 1.0 so simulation completes quickly.
      * @param timeScale 1.0 = real time; e.g. 0.001 for tests
      */
-    public DroneSubsystem(int droneId, Scheduler scheduler, double timeScale) {
+    public DroneSubsystem(int droneId, IDroneSchedulerChannel channel, double timeScale) {
         this.droneId = droneId;
-        this.scheduler = scheduler;
+        this.channel = channel;
         this.timeScale = timeScale <= 0 ? 1.0 : timeScale;
+    }
+
+    /** Convenience constructor using in-process channel (e.g. for existing tests). */
+    public DroneSubsystem(int droneId, Scheduler scheduler) {
+        this(droneId, new InProcessDroneChannel(scheduler), 1.0);
+    }
+
+    /** Convenience constructor using in-process channel (e.g. for existing tests). */
+    public DroneSubsystem(int droneId, Scheduler scheduler, double timeScale) {
+        this(droneId, new InProcessDroneChannel(scheduler), timeScale);
     }
 
     @Override
     public void run() {
-        scheduler.updateDroneState(droneId, DroneState.IDLE.name(), null);
+        channel.updateDroneState(droneId, DroneState.IDLE.name(), null);
         while (!Thread.currentThread().isInterrupted()) {
-            Incident incident = scheduler.requestWork(droneId);
+            Incident incident = channel.requestWork(droneId);
             if (incident == null) break;
 
             System.out.println("[Drone " + droneId + "] Assigned incident: " + incident);
@@ -54,11 +63,11 @@ public class DroneSubsystem implements Runnable {
                 // Simulate travel to the incident
                 double travelTime = calculateTravelTime(incident.getZoneId());
                 System.out.println("[Drone " + droneId + "] Traveling to incident. Time: " + travelTime + " seconds");
-                scheduler.updateDroneState(droneId, DroneState.EN_ROUTE.name(), incident.getZoneId());
+                channel.updateDroneState(droneId, DroneState.EN_ROUTE.name(), incident.getZoneId());
           
                 useBattery(travelTime);
                 sleepSeconds(travelTime);
-                scheduler.reportArrival(droneId, incident);
+                channel.reportArrival(droneId, incident);
                 
                 // Simulate extinguishing the fire
                 int litresNeeded = incident.getSeverity();               
@@ -67,16 +76,16 @@ public class DroneSubsystem implements Runnable {
                 double extinguishTime = calculateExtinguishTime(litresUsed);
                 System.out.println("[Drone " + droneId + "] Extinguishing fire. Used: "
                         + litresUsed + "L. Time:" + extinguishTime + "seconds");
-                scheduler.updateDroneState(droneId, DroneState.EXTINGUISHING.name(), incident.getZoneId());
+                channel.updateDroneState(droneId, DroneState.EXTINGUISHING.name(), incident.getZoneId());
                 
                 useBattery(extinguishTime);
                 sleepSeconds(extinguishTime);
 
-                scheduler.reportCompletion(droneId, incident);
+                channel.reportCompletion(droneId, incident);
                 System.out.println("[Drone " + droneId + "] Incident completed: " + incident);
 
                 // If there is another task in the queue we can service (enough agent and battery), go there next; else return to base.
-                Incident next = scheduler.peekNextIncident();
+                Incident next = channel.peekNextIncident();
                 if (next != null && canServiceWithCurrentCapacity(next)) {
                     System.out.println("[Drone " + droneId + "] Continuing to next zone (agent=" + agentRemaining + "L, battery=" + (int) batteryRemaining + "s)");
                     // Don't return to base; loop will call requestWork() and get 'next'
@@ -84,13 +93,13 @@ public class DroneSubsystem implements Runnable {
                     // No serviceable task in queue: return to base and refill
                     double returnTime = calculateTravelTime(incident.getZoneId());
                     System.out.println("[Drone " + droneId + "] Returning to base. Time: " + returnTime + " seconds");
-                    scheduler.updateDroneState(droneId, DroneState.RETURNING.name(), null);
+                    channel.updateDroneState(droneId, DroneState.RETURNING.name(), null);
                     useBattery(returnTime);
                     sleepSeconds(returnTime);
-                    scheduler.reportReturnToBase(droneId);
+                    channel.reportReturnToBase(droneId);
                     agentRemaining = (int) MAX_AGENT;
                     batteryRemaining = MAX_BATTERY;
-                    scheduler.updateDroneState(droneId, DroneState.IDLE.name(), null);
+                    channel.updateDroneState(droneId, DroneState.IDLE.name(), null);
                 }
 
             } catch (InterruptedException e) {
