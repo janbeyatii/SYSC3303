@@ -111,6 +111,15 @@ public class Scheduler implements SchedulerInterface {
         fireDroneStateChanged(droneId, state, zoneId);
     }
 
+    /**
+     * Returns the next incident in the queue without removing it, so a drone can
+     * decide whether it has enough agent and battery to service it before returning to base.
+     * @return the next incident, or null if the queue is empty
+     */
+    public synchronized Incident peekNextIncident() {
+        return queue.isEmpty() ? null : queue.getFirst().incident;
+    }
+
     public synchronized int getQueueSize(){
         return queue.size();
     }
