@@ -75,23 +75,41 @@ public class DroneSubsystem implements Runnable {
                 scheduler.reportCompletion(droneId, incident);
                 System.out.println("[Drone " + droneId + "] Incident completed: " + incident);
 
-                // Simulate return to base
-                double returnTime = calculateTravelTime(incident.getZoneId());
-                System.out.println("[Drone " + droneId + "] Returning to base. Time: " + returnTime + " seconds");
-                scheduler.updateDroneState(droneId, DroneState.RETURNING.name(), null);
-                useBattery(returnTime);
-                sleepSeconds(returnTime);
-                scheduler.reportReturnToBase(droneId);
-                agentRemaining = (int) MAX_AGENT;
-                batteryRemaining = MAX_BATTERY;
-
-                scheduler.updateDroneState(droneId, DroneState.IDLE.name(), null);
+                // If there is another task in the queue we can service (enough agent and battery), go there next; else return to base.
+                Incident next = scheduler.peekNextIncident();
+                if (next != null && canServiceWithCurrentCapacity(next)) {
+                    System.out.println("[Drone " + droneId + "] Continuing to next zone (agent=" + agentRemaining + "L, battery=" + (int) batteryRemaining + "s)");
+                    // Don't return to base; loop will call requestWork() and get 'next'
+                } else {
+                    // No serviceable task in queue: return to base and refill
+                    double returnTime = calculateTravelTime(incident.getZoneId());
+                    System.out.println("[Drone " + droneId + "] Returning to base. Time: " + returnTime + " seconds");
+                    scheduler.updateDroneState(droneId, DroneState.RETURNING.name(), null);
+                    useBattery(returnTime);
+                    sleepSeconds(returnTime);
+                    scheduler.reportReturnToBase(droneId);
+                    agentRemaining = (int) MAX_AGENT;
+                    batteryRemaining = MAX_BATTERY;
+                    scheduler.updateDroneState(droneId, DroneState.IDLE.name(), null);
+                }
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
             }
         }
+    }
+
+    /**
+     * True if this drone has enough agent and battery to service the given incident
+     * (travel to zone + extinguish + return to base) without refilling.
+     */
+    private boolean canServiceWithCurrentCapacity(Incident next) {
+        if (agentRemaining < next.getSeverity()) return false;
+        double toZone = calculateTravelTime(next.getZoneId());
+        double extinguish = calculateExtinguishTime(next.getSeverity());
+        double backToBase = calculateTravelTime(next.getZoneId());
+        return batteryRemaining >= toZone + extinguish + backToBase;
     }
 
     private double calculateTravelTime(int zoneId) {
