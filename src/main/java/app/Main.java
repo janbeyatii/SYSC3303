@@ -3,6 +3,7 @@ package app;
 import fireincident.FireIncidentSubsystem;
 import fireincident.Scheduler;
 import fireincident.DroneSubsystem;
+import fireincident.InProcessDroneChannel;
 
 import javax.swing.*;
 
@@ -21,8 +22,8 @@ public class Main {
 
         Scheduler scheduler = new Scheduler();
 
-        // ADD/KEEP: start at least 1 drone for Iteration 1
-        Thread drone1 = new Thread(new DroneSubsystem(1, scheduler), "Drone-1");
+        // Drone uses channel (in-process for single JVM; UDP when distributed)
+        Thread drone1 = new Thread(new DroneSubsystem(1, new InProcessDroneChannel(scheduler)), "Drone-1");
         drone1.start();
 
         // ADD: launch GUI on Swing EDT; use csvPath from command line if provided

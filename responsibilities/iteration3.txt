@@ -1,0 +1,15 @@
+Jan - Independent Drone Execution
+* Allow each drone to operate independently as its own process — DroneMain (app.DroneMain), one process per drone.
+* Implement individual drone state machines running concurrently — DroneSubsystem unchanged; each process runs its own state machine via channel.
+* Ensure each drone reports its position and status to the scheduler — All reporting through IDroneSchedulerChannel (updateDroneState, reportArrival, reportCompletion, reportReturnToBase).
+* Handle drone task execution including travel, agent deployment, and return — No change; still in DroneSubsystem.
+* Maintain communication with the scheduler using UDP messages — UDPDroneChannel; DronePacketBuilder and DronePacketParser (fireincident.udp) for message format.
+* Channel abstraction so drone can use in-process or UDP — IDroneSchedulerChannel, InProcessDroneChannel; DroneSubsystem refactored to use channel.
+
+Iman
+
+
+Samy
+
+
+Mithushan
