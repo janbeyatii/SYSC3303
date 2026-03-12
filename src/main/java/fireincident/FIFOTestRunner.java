@@ -1,27 +1,27 @@
 package fireincident;
 
 import model.Incident;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
 import udp.MessageType;
 import udp.Ports;
 import udp.UDPMessage;
 
-/**
- * Manual test runner: one drone, three incidents, verifies FIFO completion order
- * and fire state transitions. Run as main() to exercise the scheduler.
- */
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+
 public class FIFOTestRunner {
+
     public static void main(String[] args) throws Exception {
         Scheduler scheduler = new Scheduler();
         Thread schedulerThread = new Thread(scheduler, "Scheduler");
         schedulerThread.setDaemon(true);
         schedulerThread.start();
+
         DroneSubsystem drone = new DroneSubsystem(1, 0.001);
         Thread droneThread = new Thread(drone, "Drone-1");
         droneThread.setDaemon(true);
         droneThread.start();
+
         Thread.sleep(200);
 
         Incident i1 = new Incident("00:00:01", 3, "FIRE", 10);
@@ -45,8 +45,7 @@ public class FIFOTestRunner {
             String received = new String(data, 0, packet.getLength()).trim();
             UDPMessage msg = UDPMessage.fromString(received);
             if (msg.getType() == MessageType.INCIDENT_COMPLETED) {
-                completedKeys[completedCount] = msg.getField(0) + "|" + msg.getField(1) + "|" + msg.getField(2);
-                System.out.println("[TEST] Completed " + (completedCount + 1) + ": " + completedKeys[completedCount]);
+                completedKeys[completedCount] = msg.getField(0) + "|" + msg.getField(1) + "|" + msg.getField(2);                System.out.println("[TEST] Completed " + (completedCount + 1) + ": " + completedKeys[completedCount]);
                 completedCount++;
             }
         }
@@ -62,7 +61,7 @@ public class FIFOTestRunner {
         testSocket.close();
         listenSocket.close();
     }
-    private static void sendIncident(Datagr amSocket socket, Incident incident) throws Exception {
+    private static void sendIncident(DatagramSocket socket, Incident incident) throws Exception {
         byte[] data = UDPMessage.incidentReport(incident).toBytes();
         DatagramPacket packet = new DatagramPacket(data, data.length,
                 InetAddress.getLocalHost(), Ports.SCHEDULER);
