@@ -1,25 +1,49 @@
 package fireincident;
 
 import model.Incident;
+import udp.MessageType;
+import udp.Ports;
+import udp.UDPMessage;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+
+
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
 
 /**
  * Main class for Fire Incident Subsystem.
  * Reads CSV files, creates Incident objects, and sends them to the scheduler.
  * handles callbacks when incidents are completed.
  */
-public class FireIncidentSubsystem implements IncidentCallback {
-    private SchedulerInterface scheduler;
+public class FireIncidentSubsystem implements Runnable {
+    DatagramPacket sendPacket;
+    DatagramSocket sendSocket;
+    DatagramPacket receivePacket;
+    DatagramSocket receiveSocket;
+
     private String csvFilePath;
-
-    public FireIncidentSubsystem(String csvFilePath, SchedulerInterface scheduler) {
+    public FireIncidentSubsystem(String csvFilePath) {
         this.csvFilePath = csvFilePath;
-        this.scheduler = scheduler;
+        try {
+            sendSocket = new DatagramSocket();
+            receiveSocket = new DatagramSocket(Ports.FIRE_IS);
+            System.out.println("[FireIncidentSubsystem] Listening on port " + Ports.FIRE_IS);
+        } catch (IOException e) {
+            e.printStackTrace();
+            System.exit(1);
+        }
     }
-
+    @Override
+    public void run() {
+        Thread receiver = new Thread(this::receiveLoop, "FIS-Receiver");
+        receiver.setDaemon(true);
+        receiver.start();
+        processIncidents();
+    }
     /**
      * Reads the CSV file and processes each incident.
      * Skips the first line (header) and sends each incident to the scheduler.
@@ -42,7 +66,7 @@ public class FireIncidentSubsystem implements IncidentCallback {
                     Incident incident = parseIncident(line, lineNumber);
                     if (incident != null) {
                         System.out.println("[FireIncidentSubsystem] Parsed incident: " + incident);
-                        scheduler.receiveIncident(incident, this);
+                        sendIncident(incident);
                     }
                 } catch (Exception e) {
                     System.err.println("[FireIncidentSubsystem] Error parsing line " + lineNumber + ": " + e.getMessage());
@@ -50,15 +74,60 @@ public class FireIncidentSubsystem implements IncidentCallback {
                 }
                 lineNumber++;
             }
-
             System.out.println("[FireIncidentSubsystem] Finished processing CSV file. Total lines processed: " + (lineNumber - 2));
-
         } catch (IOException e) {
             System.err.println("[FireIncidentSubsystem] Error reading CSV file: " + e.getMessage());
             e.printStackTrace();
         }
     }
+    private void sendIncident(Incident incident) {
+        try {
+            byte[] msg = UDPMessage.incidentReport(incident).toBytes();
+            sendPacket = new DatagramPacket(msg, msg.length,
+                    InetAddress.getLocalHost(), Ports.SCHEDULER);
+            System.out.println("[FireIncidentSubsystem] Sending packet:");
+            System.out.println("To host: " + sendPacket.getAddress());
+            System.out.println("Destination host port: " + sendPacket.getPort());
+            System.out.println("Length: " + sendPacket.getLength());
+            System.out.print("Containing: ");
+            System.out.println(new String(sendPacket.getData(), 0, sendPacket.getLength()));
+            sendSocket.send(sendPacket);
+            System.out.println("[FireIncidentSubsystem] Packet sent.\n");
+        }catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+    private void receiveLoop() {
+        while (true) {
+            try {
+                byte[] data = new byte[UDPMessage.MAX_SIZE];
+                receivePacket = new DatagramPacket(data, data.length);
+                System.out.println("[FireIncidentSubsystem] Waiting for packet...");
+                receiveSocket.receive(receivePacket);
+                System.out.println("[FireIncidentSubsystem] Packet received:");
+                System.out.println("From host: " + receivePacket.getAddress());
+                System.out.println("Host port: " + receivePacket.getPort());
+                int len = receivePacket.getLength();
+                System.out.println("Length: " + len);
+                System.out.print("Containing: ");
+                String received = new String(data, 0, len);
+                System.out.println(received);
 
+                UDPMessage msg = UDPMessage.fromString(received.trim());
+
+                if (msg.getType() == MessageType.INCIDENT_COMPLETED) {
+                    System.out.println("[FireIncidentSubsystem] Received completion notification for: " + msg.getField(0));
+                } else if (msg.getType() == MessageType.SHUTDOWN) {
+                    System.out.println("[FireIncidentSubsystem] Shutdown received.");
+                    break;
+                }
+
+            } catch (IOException e) {
+                e.printStackTrace();
+                break;
+            }
+        }
+    }
     /**
      * Takes a line from the CSV and turns it into an Incident object.
      * Format should be: time,zoneId,eventType,severity
@@ -69,12 +138,10 @@ public class FireIncidentSubsystem implements IncidentCallback {
             System.out.println("[FireIncidentSubsystem] Skipping empty line " + lineNumber);
             return null;
         }
-
         String[] parts = line.split(",");
         if (parts.length < 4) {
             throw new IllegalArgumentException("Expected 4 fields but found " + parts.length);
         }
-
         try {
             String time = parts[0].trim();
             int zoneId = Integer.parseInt(parts[1].trim());
@@ -86,7 +153,6 @@ public class FireIncidentSubsystem implements IncidentCallback {
             throw new IllegalArgumentException("Invalid number format in line " + lineNumber + ": " + e.getMessage());
         }
     }
-
     /**
      * Converts severity to litres of water/foam needed (per spec: Low=10 L, Moderate=20 L, High=30 L).
      * Accepts words "High", "Moderate", "Low" or numeric litres 10, 20, 30.
@@ -113,14 +179,5 @@ public class FireIncidentSubsystem implements IncidentCallback {
             throw new IllegalArgumentException("Unknown severity value: " + severityStr +
                     ". Expected High (30 L), Moderate (20 L), Low (10 L), or 10/20/30");
         }
-    }
-
-    /**
-     * This gets called when the scheduler finishes handling an incident.
-     * Right now it just prints a message.
-     */
-    @Override
-    public void onIncidentCompleted(Incident incident) {
-        System.out.println("[FireIncidentSubsystem] Received completion notification for: " + incident);
     }
 }
