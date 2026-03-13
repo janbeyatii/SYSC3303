@@ -237,4 +237,45 @@ public class Scheduler implements Runnable {
         System.out.println(message);
         for (SchedulerListener l : listeners) l.onLog(message);
     }
+    public synchronized Incident peekNextIncident() {
+        return queue.isEmpty() ? null : queue.getFirst().incident;
+    }
+
+    public synchronized Incident requestWork(int droneId) {
+        updateDroneState(droneId, DroneState.IDLE.name(), null);
+        while (queue.isEmpty()) {
+            try {
+                wait();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+        }
+        Job job = queue.removeFirst();
+        inProgressByZone.put(job.incident.getZoneId(), job);
+        fireStates.put(job.incident.getKey(), FireState.ASSIGNED);
+        schedulerState = SchedulerState.DRONE_BUSY;
+        fireLog("[Scheduler] Dispatched incident to Drone " + droneId + ": " + job.incident);
+        fireIncidentDispatched(droneId, job.incident);
+        return job.incident;
+    }
+
+    public synchronized void reportCompletion(int droneId, Incident incident) {
+        inProgressByZone.remove(incident.getZoneId());
+        fireStates.put(incident.getKey(), FireState.COMPLETED);
+        fireLog("[Scheduler] Completion from Drone " + droneId + ": " + incident);
+        fireIncidentCompleted(droneId, incident);
+        schedulerState = queue.isEmpty() ? SchedulerState.IDLE : SchedulerState.HAS_PENDING;
+        notifyAll();
+    }
+
+    public synchronized void reportArrival(int droneId, Incident incident) {
+        fireLog("[Scheduler] Drone " + droneId + " arrived at zone " + incident.getZoneId());
+        updateDroneState(droneId, "ARRIVED", incident.getZoneId());
+    }
+
+    public synchronized void reportReturnToBase(int droneId) {
+        fireLog("[Scheduler] Drone " + droneId + " returned to base");
+        updateDroneState(droneId, DroneState.IDLE.name(), null);
+    }
 }
