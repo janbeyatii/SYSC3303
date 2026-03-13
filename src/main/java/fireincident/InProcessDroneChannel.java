@@ -17,7 +17,6 @@ public class InProcessDroneChannel implements IDroneSchedulerChannel {
     public Incident requestWork(int droneId) {
         return scheduler.requestWork(droneId);
     }
-
     @Override
     public Incident peekNextIncident() {
         return scheduler.peekNextIncident();
@@ -42,4 +41,5 @@ public class InProcessDroneChannel implements IDroneSchedulerChannel {
     public void updateDroneState(int droneId, String state, Integer zoneId) {
         scheduler.updateDroneState(droneId, state, zoneId);
     }
+
 }

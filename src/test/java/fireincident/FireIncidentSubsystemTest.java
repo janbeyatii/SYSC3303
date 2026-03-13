@@ -72,7 +72,7 @@ public class FireIncidentSubsystemTest {
             w.write("12:00:00,1,FIRE_DETECTED,10\n"); // Low as litres
         }
 
-        FireIncidentSubsystem fis = new FireIncidentSubsystem(csv.getPath(), mockScheduler);
+        FireIncidentSubsystem fis = new FireIncidentSubsystem(csv.getPath());
         fis.processIncidents();
 
         assertEquals(1, receivedIncidents.size());
@@ -104,7 +104,7 @@ public class FireIncidentSubsystemTest {
             w.write("Time,Zone ID,Event type,Severity\n"); // Header only
         }
 
-        FireIncidentSubsystem fis = new FireIncidentSubsystem(csv.getPath(), mockScheduler);
+        FireIncidentSubsystem fis = new FireIncidentSubsystem(csv.getPath());
         fis.processIncidents();
 
         assertTrue(receivedIncidents.isEmpty());
