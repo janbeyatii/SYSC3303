@@ -43,7 +43,8 @@ public class DroneMain {
             try {
                 timeScale = Double.parseDouble(args[3].trim());
                 if (timeScale <= 0) timeScale = 1.0;
-            } catch (NumberFormatException ignored) { }
+            } catch (NumberFormatException ignored) {
+            }
         }
 
         IDroneSchedulerChannel channel = new UDPDroneChannel(host, port, droneId);

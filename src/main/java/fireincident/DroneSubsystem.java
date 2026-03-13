@@ -1,144 +1,153 @@
 package fireincident;
-
 import model.Incident;
+import udp.MessageType;
+import udp.Ports;
+import udp.UDPMessage;
+import java.io.IOException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
 
-/**
- * Drone subsystem (client): runs in its own thread, requests work from the
- * scheduler via {@link IDroneSchedulerChannel}, simulates travel, dropping agent,
- * and return, then reports completion. The channel may be in-process or UDP.
- */
+
 public class DroneSubsystem implements Runnable {
-    private static final double CRUISE_SPEED = 10.0; // m/s
-    private static final int TAKEOFF_TIME = 8;       // seconds
-    private static final int LANDING_TIME = 10;      // seconds
-    private static final int ACCEL_TIME = 3;         // seconds
-    private static final int DECEL_TIME = 3;         // seconds
-    private static final double NOZZLE_OPEN_TIME = 0.5; // seconds 
-    private static final double NOZZLE_CLOSE_TIME = 0.5; // seconds 
-    private static final double RELEASE_RATE = 190.0 / 60.0; // L/s
+    private static final double CRUISE_SPEED = 10.0;
+    private static final int TAKEOFF_TIME = 8;
+    private static final int LANDING_TIME = 10;
+    private static final int ACCEL_TIME = 3;
+    private static final int DECEL_TIME = 3;
+    private static final double NOZZLE_OPEN_TIME = 0.5;
+    private static final double NOZZLE_CLOSE_TIME = 0.5;
+    private static final double RELEASE_RATE = 190.0 / 60.0;
     private static final double MAX_AGENT = 100;
     private static final double MAX_BATTERY = 900;
     private int agentRemaining = (int) MAX_AGENT;
     private double batteryRemaining = MAX_BATTERY;
-    
     private final int droneId;
-    private final IDroneSchedulerChannel channel;
-    /** Scale factor for sleep times (1.0 = real time; use &lt; 1.0 in tests to run fast). */
     private final double timeScale;
-
-    public DroneSubsystem(int droneId, IDroneSchedulerChannel channel) {
-        this(droneId, channel, 1.0);
+    DatagramPacket sendPacket, receivePacket;
+    DatagramSocket sendSocket, receiveSocket;
+    public DroneSubsystem(int droneId) {
+        this(droneId, 1.0);
     }
-
-    /**
-     * Constructor for tests: use timeScale &lt; 1.0 so simulation completes quickly.
-     * @param timeScale 1.0 = real time; e.g. 0.001 for tests
-     */
-    public DroneSubsystem(int droneId, IDroneSchedulerChannel channel, double timeScale) {
+    public DroneSubsystem(int droneId, double timeScale) {
         this.droneId = droneId;
-        this.channel = channel;
         this.timeScale = timeScale <= 0 ? 1.0 : timeScale;
+        try {
+            sendSocket = new DatagramSocket();
+            receiveSocket = new DatagramSocket(Ports.DRONE_SS);
+            System.out.println("[Drone " + droneId + "] Listening on port " + Ports.DRONE_SS);
+        } catch (IOException e) {
+            e.printStackTrace();
+            System.exit(1);
+        }
     }
-
-    /** Convenience constructor using in-process channel (e.g. for existing tests). */
-    public DroneSubsystem(int droneId, Scheduler scheduler) {
-        this(droneId, new InProcessDroneChannel(scheduler), 1.0);
-    }
-
-    /** Convenience constructor using in-process channel (e.g. for existing tests). */
-    public DroneSubsystem(int droneId, Scheduler scheduler, double timeScale) {
-        this(droneId, new InProcessDroneChannel(scheduler), timeScale);
-    }
-
     @Override
     public void run() {
-        channel.updateDroneState(droneId, DroneState.IDLE.name(), null);
+        sendToScheduler(UDPMessage.droneIdle(droneId));
+        updateDroneState(DroneState.IDLE.name(), null);
         while (!Thread.currentThread().isInterrupted()) {
-            Incident incident = channel.requestWork(droneId);
+            Incident incident = waitForDispatch();
             if (incident == null) break;
-
             System.out.println("[Drone " + droneId + "] Assigned incident: " + incident);
-
             try {
-                // Simulate travel to the incident
                 double travelTime = calculateTravelTime(incident.getZoneId());
                 System.out.println("[Drone " + droneId + "] Traveling to incident. Time: " + travelTime + " seconds");
-                channel.updateDroneState(droneId, DroneState.EN_ROUTE.name(), incident.getZoneId());
-          
+                updateDroneState(DroneState.EN_ROUTE.name(), incident.getZoneId());
                 useBattery(travelTime);
                 sleepSeconds(travelTime);
-                channel.reportArrival(droneId, incident);
-                
-                // Simulate extinguishing the fire
-                int litresNeeded = incident.getSeverity();               
-                int litresUsed = Math.min(litresNeeded, agentRemaining);   
-                agentRemaining -= litresUsed;                             
+                sendToScheduler(UDPMessage.droneArrived(droneId, incident));
+                int litresNeeded = incident.getSeverity();
+                int litresUsed = Math.min(litresNeeded, agentRemaining);
+                agentRemaining -= litresUsed;
                 double extinguishTime = calculateExtinguishTime(litresUsed);
                 System.out.println("[Drone " + droneId + "] Extinguishing fire. Used: "
                         + litresUsed + "L. Time:" + extinguishTime + "seconds");
-                channel.updateDroneState(droneId, DroneState.EXTINGUISHING.name(), incident.getZoneId());
-                
+                updateDroneState(DroneState.EXTINGUISHING.name(), incident.getZoneId());
                 useBattery(extinguishTime);
                 sleepSeconds(extinguishTime);
-
-                channel.reportCompletion(droneId, incident);
+                sendToScheduler(UDPMessage.droneDroppedAgent(droneId, incident));
                 System.out.println("[Drone " + droneId + "] Incident completed: " + incident);
-
-                // If there is another task in the queue we can service (enough agent and battery), go there next; else return to base.
-                Incident next = channel.peekNextIncident();
-                if (next != null && canServiceWithCurrentCapacity(next)) {
-                    System.out.println("[Drone " + droneId + "] Continuing to next zone (agent=" + agentRemaining + "L, battery=" + (int) batteryRemaining + "s)");
-                    // Don't return to base; loop will call requestWork() and get 'next'
-                } else {
-                    // No serviceable task in queue: return to base and refill
-                    double returnTime = calculateTravelTime(incident.getZoneId());
-                    System.out.println("[Drone " + droneId + "] Returning to base. Time: " + returnTime + " seconds");
-                    channel.updateDroneState(droneId, DroneState.RETURNING.name(), null);
-                    useBattery(returnTime);
-                    sleepSeconds(returnTime);
-                    channel.reportReturnToBase(droneId);
-                    agentRemaining = (int) MAX_AGENT;
-                    batteryRemaining = MAX_BATTERY;
-                    channel.updateDroneState(droneId, DroneState.IDLE.name(), null);
-                }
-
+                double returnTime = calculateTravelTime(incident.getZoneId());
+                System.out.println("[Drone " + droneId + "] Returning to base. Time: " + returnTime + " seconds");
+                updateDroneState(DroneState.RETURNING.name(), null);
+                sendToScheduler(UDPMessage.droneReturning(droneId));
+                useBattery(returnTime);
+                sleepSeconds(returnTime);
+                agentRemaining = (int) MAX_AGENT;
+                batteryRemaining = MAX_BATTERY;
+                sendToScheduler(UDPMessage.droneIdle(droneId));
+                updateDroneState(DroneState.IDLE.name(), null);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
             }
         }
     }
-
-    /**
-     * True if this drone has enough agent and battery to service the given incident
-     * (travel to zone + extinguish + return to base) without refilling.
-     */
-    private boolean canServiceWithCurrentCapacity(Incident next) {
-        if (agentRemaining < next.getSeverity()) return false;
-        double toZone = calculateTravelTime(next.getZoneId());
-        double extinguish = calculateExtinguishTime(next.getSeverity());
-        double backToBase = calculateTravelTime(next.getZoneId());
-        return batteryRemaining >= toZone + extinguish + backToBase;
+    private Incident waitForDispatch() {
+        while (!Thread.currentThread().isInterrupted()) {
+            try {
+                byte[] data = new byte[UDPMessage.MAX_SIZE];
+                receivePacket = new DatagramPacket(data, data.length);
+                System.out.println("[Drone " + droneId + "] Waiting for dispatch...");
+                receiveSocket.receive(receivePacket);
+                System.out.println("[Drone " + droneId + "] Packet received:");
+                System.out.println("From host: " + receivePacket.getAddress());
+                System.out.println("Host port: " + receivePacket.getPort());
+                int len = receivePacket.getLength();
+                System.out.println("Length: " + len);
+                System.out.print("Containing: ");
+                String received = new String(data, 0, len);
+                System.out.println(received + "\n");
+                UDPMessage msg = UDPMessage.fromString(received.trim());
+                if (msg.getType() == MessageType.DISPATCH_DRONE) {
+                    int target = Integer.parseInt(msg.getField(0));
+                    if (target == droneId) {
+                        return msg.toIncident();
+                    }
+                } else if (msg.getType() == MessageType.SHUTDOWN) {
+                    System.out.println("[Drone " + droneId + "] Shutdown received.");
+                    return null;
+                }
+            } catch (IOException e) {
+                System.err.println("[Drone " + droneId + "] Receive error: " + e.getMessage());
+            }
+        }
+        return null;
     }
-
+    private void sendToScheduler(UDPMessage message) {
+        try {
+            byte[] msg = message.toBytes();
+            sendPacket = new DatagramPacket(msg, msg.length, InetAddress.getLocalHost(), Ports.SCHEDULER);
+            System.out.println("[Drone " + droneId + "] Sending packet:");
+            System.out.println("To host: " + sendPacket.getAddress());
+            System.out.println("Destination host port: " + sendPacket.getPort());
+            System.out.println("Length: " + sendPacket.getLength());
+            System.out.print("Containing: ");
+            System.out.println(new String(sendPacket.getData(), 0, sendPacket.getLength()));
+            sendSocket.send(sendPacket);
+        } catch (IOException e) {
+            System.err.println("[Drone " + droneId + "] Send error: " + e.getMessage());
+        }
+    }
+    private void updateDroneState(String state, Integer zoneId) {
+        sendToScheduler(UDPMessage.droneState(droneId, state, zoneId));
+    }
     private double calculateTravelTime(int zoneId) {
-        // Assume each zone is 100 meters away from the previous one
-        double distance = zoneId * 100.0; // meters
-        double cruiseTime = distance / CRUISE_SPEED; // time at cruise speed
+        double distance = zoneId * 100.0;
+        double cruiseTime = distance / CRUISE_SPEED;
         return TAKEOFF_TIME + ACCEL_TIME + cruiseTime + DECEL_TIME + LANDING_TIME;
     }
-
     private double calculateExtinguishTime(int litresUsed) {
-        // Severity is stored as litres (Low=10, Moderate=20, High=30 per spec)
         return NOZZLE_OPEN_TIME + (litresUsed / RELEASE_RATE) + NOZZLE_CLOSE_TIME;
     }
-
-    private void useBattery(double seconds){
-        batteryRemaining = Math.max(0, batteryRemaining - seconds);   
+    private void useBattery(double seconds) {
+        batteryRemaining = Math.max(0, batteryRemaining - seconds);
     }
-
     private void sleepSeconds(double seconds) throws InterruptedException {
         long ms = Math.max(1, (long) (seconds * 1000 * timeScale));
         Thread.sleep(ms);
+    }
+    public DroneSubsystem(int droneId, IDroneSchedulerChannel channel, double timeScale) {
+        this(droneId, timeScale);
     }
 }

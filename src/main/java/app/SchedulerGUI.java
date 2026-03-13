@@ -14,11 +14,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * GUI for Scheduler: load incident CSV, start simulation, and display
- * drone current state, active fire count, current zone being serviced,
- * and event log. Implements {@link SchedulerListener} for live updates.
- */
+
 public class SchedulerGUI extends JFrame implements SchedulerListener {
 
     private final Scheduler scheduler;
@@ -38,11 +34,9 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
 
     private JTextArea logArea;
 
-    // helps update a specific incident row
     private final Map<String, Integer> incidentRowByKey = new HashMap<>();
     private final Map<Integer, Integer> droneRowById = new HashMap<>();
 
-    /** Default CSV path shown in the file field (from command line or default). */
     private final String defaultCsvPath;
 
     public SchedulerGUI(Scheduler scheduler) {
@@ -55,9 +49,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
                 ? defaultCsvPath.trim()
                 : "data/Sample_event_file.csv";
 
-        // ADD: register GUI as a listener
         this.scheduler.addListener(this);
-
         setTitle("Firefighting Drone Swarm - Scheduler");
         setSize(950, 650);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -105,8 +97,6 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
     private void buildCenterPanels(){
         JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
         split.setResizeWeight(0.65);
-
-        // Incidents table
         incidentModel = new DefaultTableModel(
                 new Object[]{"Time", "Zone", "Type", "Severity", "Status", "Drone"}, 0
         ) {
@@ -119,7 +109,6 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         incidentPanel.setBorder(BorderFactory.createTitledBorder("Incidents"));
         incidentPanel.add(incidentScroll, BorderLayout.CENTER);
 
-        // Drones table
         droneModel = new DefaultTableModel(
                 new Object[]{"Drone", "State", "Zone", "Last Update"}, 0
         ) {
@@ -167,10 +156,8 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
 
         String filePath = fileField.getText().trim();
         log("[GUI] Starting simulation using: " + filePath);
-
-        // ADD: run FireIncidentSubsystem in a background thread so GUI stays responsive
         Thread t = new Thread(() -> {
-            FireIncidentSubsystem fis = new FireIncidentSubsystem(filePath, scheduler);
+            FireIncidentSubsystem fis = new FireIncidentSubsystem(filePath);
             fis.processIncidents();
 
             SwingUtilities.invokeLater(() -> {
@@ -203,7 +190,6 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         return new SimpleDateFormat("HH:mm:ss").format(new Date());
     }
 
-    // SchedulerListener callbacks (these can be called from non-GUI threads)
     @Override
     public void onIncidentQueued(Incident incident){
         SwingUtilities.invokeLater(() -> {

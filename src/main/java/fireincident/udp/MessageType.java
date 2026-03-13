@@ -1,0 +1,13 @@
+package udp;
+
+public enum MessageType {
+    INCIDENT_REPORT,
+    DISPATCH_DRONE,
+    DRONE_ARRIVED,
+    DRONE_DROPPED_AGENT,
+    DRONE_RETURNING,
+    DRONE_IDLE,
+    DRONE_STATE,
+    INCIDENT_COMPLETED,
+    SHUTDOWN
+}
