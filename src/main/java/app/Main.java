@@ -13,7 +13,7 @@ public class Main {
         String csvPath = (args != null && args.length > 0 && args[0] != null && !args[0].isEmpty())
                 ? args[0].trim()
                 : DEFAULT_CSV;
-        Scheduler scheduler = new Scheduler();
+        Scheduler scheduler = new Scheduler(true);
         Thread schedulerThread = new Thread(scheduler, "Scheduler");
         schedulerThread.setDaemon(true);
         schedulerThread.start();

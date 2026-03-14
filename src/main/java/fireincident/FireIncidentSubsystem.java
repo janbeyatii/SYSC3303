@@ -26,15 +26,24 @@ public class FireIncidentSubsystem implements Runnable {
     DatagramSocket receiveSocket;
 
     private String csvFilePath;
+    private final SchedulerInterface scheduler;
+
     public FireIncidentSubsystem(String csvFilePath) {
+        this(csvFilePath, null);
+    }
+
+    public FireIncidentSubsystem(String csvFilePath, SchedulerInterface scheduler) {
         this.csvFilePath = csvFilePath;
+        this.scheduler = scheduler;
+        if (scheduler != null) {
+            return;
+        }
         try {
             sendSocket = new DatagramSocket();
             receiveSocket = new DatagramSocket(Ports.FIRE_IS);
             System.out.println("[FireIncidentSubsystem] Listening on port " + Ports.FIRE_IS);
         } catch (IOException e) {
-            e.printStackTrace();
-            System.exit(1);
+            throw new IllegalStateException("Failed to initialize fire incident subsystem sockets", e);
         }
     }
     @Override
@@ -81,6 +90,10 @@ public class FireIncidentSubsystem implements Runnable {
         }
     }
     private void sendIncident(Incident incident) {
+        if (scheduler != null) {
+            scheduler.receiveIncident(incident, null);
+            return;
+        }
         try {
             byte[] msg = UDPMessage.incidentReport(incident).toBytes();
             sendPacket = new DatagramPacket(msg, msg.length,

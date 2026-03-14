@@ -7,9 +7,20 @@ Jan - Independent Drone Execution
 * Channel abstraction so drone can use in-process or UDP — IDroneSchedulerChannel, InProcessDroneChannel; DroneSubsystem refactored to use channel.
 
 Iman
-
+ * Replace direct method calls with message based communication
+ * Ensure Fire Incident Subsystem, Scheduler, and Drone Subsystem communicate exclusively through UDP
+ * Implement packet creation and parsing for system messages
+ * Handle sending and receiving packets reliably
 
 Samy
-
+* Create test scenarios involving multiple drones and fire events
+* Verify communication between distributed processes
+* Ensure scheduler correctly assigns drones to fire zones
+* Update project documentation and testing instructions
 
 Mithushan
+* Extend the Scheduler to support multiple drones
+* Track the status and location of each drone
+* Assign fire incidents to the most appropriate available drone
+* Balance workload between drones to maximize throughput
+* Ensure scheduler updates drone assignments based on queue state

@@ -20,7 +20,6 @@ public class FireIncidentSubsystemTest {
     public TemporaryFolder folder = new TemporaryFolder();
 
     private List<Incident> receivedIncidents;
-    private List<Incident> completedIncidents;
     private SchedulerInterface mockScheduler;
 
     @Before
@@ -72,7 +71,7 @@ public class FireIncidentSubsystemTest {
             w.write("12:00:00,1,FIRE_DETECTED,10\n"); // Low as litres
         }
 
-        FireIncidentSubsystem fis = new FireIncidentSubsystem(csv.getPath());
+        FireIncidentSubsystem fis = new FireIncidentSubsystem(csv.getPath(), mockScheduler);
         fis.processIncidents();
 
         assertEquals(1, receivedIncidents.size());
@@ -104,7 +103,7 @@ public class FireIncidentSubsystemTest {
             w.write("Time,Zone ID,Event type,Severity\n"); // Header only
         }
 
-        FireIncidentSubsystem fis = new FireIncidentSubsystem(csv.getPath());
+        FireIncidentSubsystem fis = new FireIncidentSubsystem(csv.getPath(), mockScheduler);
         fis.processIncidents();
 
         assertTrue(receivedIncidents.isEmpty());

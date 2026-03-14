@@ -1,11 +1,13 @@
 package fireincident;
 
 import model.Incident;
-import org.junit.Test;
+import org.junit.After;
 import org.junit.Before;
+import org.junit.Test;
 
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.LinkedList;
 
 import static org.junit.Assert.*;
 
@@ -16,6 +18,11 @@ public class SchedulerTest {
     @Before
     public void setUp() {
         scheduler = new Scheduler();
+    }
+
+    @After
+    public void tearDown() {
+        scheduler.shutdown();
     }
 
     @Test
@@ -45,5 +52,24 @@ public class SchedulerTest {
 
         scheduler.reportCompletion(1, incident);
         assertEquals(Scheduler.SchedulerState.IDLE, scheduler.getSchedulerState());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testSchedulerSelectsClosestIdleDroneForZone() throws Exception {
+        scheduler.updateDroneState(1, DroneState.IDLE.name(), 2);
+        scheduler.updateDroneState(2, DroneState.IDLE.name(), 8);
+
+        Field idleDronesField = Scheduler.class.getDeclaredField("idleDrones");
+        idleDronesField.setAccessible(true);
+        LinkedList<Integer> idleDrones = (LinkedList<Integer>) idleDronesField.get(scheduler);
+        idleDrones.add(1);
+        idleDrones.add(2);
+
+        Method selectBestDrone = Scheduler.class.getDeclaredMethod("selectBestDrone", int.class);
+        selectBestDrone.setAccessible(true);
+
+        assertEquals(1, ((Integer) selectBestDrone.invoke(scheduler, 3)).intValue());
+        assertEquals(2, ((Integer) selectBestDrone.invoke(scheduler, 9)).intValue());
     }
 }

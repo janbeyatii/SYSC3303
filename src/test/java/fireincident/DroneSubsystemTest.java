@@ -1,60 +1,77 @@
 package fireincident;
 
 import model.Incident;
-import org.junit.Test;
+import org.junit.After;
 import org.junit.Before;
+import org.junit.Test;
 
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class DroneSubsystemTest {
 
     private Scheduler scheduler;
-    private CountDownLatch completionLatch;
 
     @Before
     public void setUp() {
         scheduler = new Scheduler();
-        completionLatch = new CountDownLatch(1);
+    }
+
+    @After
+    public void tearDown() {
+        scheduler.shutdown();
     }
 
     @Test
-    public void testDroneStateTransitions() throws InterruptedException {
-        Incident incident = new Incident("14:03:15", 3, "FIRE_DETECTED", 30);
-        scheduler.receiveIncident(incident, completed -> completionLatch.countDown());
+    public void testMultipleDronesHandleMultipleIncidents() throws Exception {
+        CountDownLatch completionLatch = new CountDownLatch(2);
+        Set<Integer> dispatchedDrones = ConcurrentHashMap.newKeySet();
+        scheduler.addListener(new SchedulerListener() {
+            @Override
+            public void onIncidentQueued(Incident incident) {
+            }
 
-        Thread droneThread = new Thread(new DroneSubsystem(1, scheduler, 0.001), "Drone-1");
-        droneThread.start();
+            @Override
+            public void onIncidentDispatched(int droneId, Incident incident) {
+                dispatchedDrones.add(droneId);
+            }
 
-        // Wait for the incident to complete
-        assertTrue(completionLatch.await(15, TimeUnit.SECONDS));
+            @Override
+            public void onIncidentCompleted(int droneId, Incident incident) {
+            }
 
-        // Verify state transitions
-        assertEquals(Scheduler.SchedulerState.IDLE, scheduler.getSchedulerState()); // Compare with enum, not String
-        droneThread.interrupt();
-        droneThread.join(1000);
-    }
+            @Override
+            public void onDroneStateChanged(int droneId, String state, Integer zoneId) {
+            }
 
-    @Test
-    public void testPartialAgentUsage() throws InterruptedException {
-        Incident incident1 = new Incident("14:03:15", 3, "FIRE_DETECTED", 80);
-        Incident incident2 = new Incident("14:10:00", 4, "FIRE_DETECTED", 50);
+            @Override
+            public void onLog(String message) {
+            }
+        });
 
-        CountDownLatch latch = new CountDownLatch(2); // Adjust latch for two incidents
-        scheduler.receiveIncident(incident1, completed -> latch.countDown());
-        scheduler.receiveIncident(incident2, completed -> latch.countDown());
+        Incident incident1 = new Incident("14:03:15", 3, "FIRE_DETECTED", 30);
+        Incident incident2 = new Incident("14:10:00", 7, "FIRE_DETECTED", 20);
+        scheduler.receiveIncident(incident1, completed -> completionLatch.countDown());
+        scheduler.receiveIncident(incident2, completed -> completionLatch.countDown());
 
-        Thread droneThread = new Thread(new DroneSubsystem(1, scheduler, 0.001), "Drone-1");
-        droneThread.start();
+        Thread drone1 = new Thread(new DroneSubsystem(1, scheduler, 0.001), "Drone-1");
+        Thread drone2 = new Thread(new DroneSubsystem(2, scheduler, 0.001), "Drone-2");
+        drone1.start();
+        drone2.start();
 
-        // Wait for both incidents to complete
-        assertTrue(latch.await(30, TimeUnit.SECONDS));
-
-        // Verify that the drone handled partial agent usage
+        assertTrue(completionLatch.await(10, TimeUnit.SECONDS));
         assertEquals(0, scheduler.getQueueSize());
-        droneThread.interrupt();
-        droneThread.join(1000);
+        assertEquals(0, scheduler.getInProgressCount());
+        assertEquals(2, dispatchedDrones.size());
+
+        drone1.interrupt();
+        drone2.interrupt();
+        drone1.join(1000);
+        drone2.join(1000);
     }
 }
