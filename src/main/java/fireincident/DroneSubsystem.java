@@ -24,25 +24,36 @@ public class DroneSubsystem implements Runnable {
     private double batteryRemaining = MAX_BATTERY;
     private final int droneId;
     private final double timeScale;
+    private final Scheduler scheduler;
     DatagramPacket sendPacket, receivePacket;
     DatagramSocket sendSocket, receiveSocket;
     public DroneSubsystem(int droneId) {
-        this(droneId, 1.0);
+        this(droneId, (Scheduler) null, 1.0);
     }
     public DroneSubsystem(int droneId, double timeScale) {
+        this(droneId, (Scheduler) null, timeScale);
+    }
+    public DroneSubsystem(int droneId, Scheduler scheduler, double timeScale) {
         this.droneId = droneId;
+        this.scheduler = scheduler;
         this.timeScale = timeScale <= 0 ? 1.0 : timeScale;
+        if (scheduler != null) {
+            return;
+        }
         try {
             sendSocket = new DatagramSocket();
             receiveSocket = new DatagramSocket(Ports.DRONE_SS);
             System.out.println("[Drone " + droneId + "] Listening on port " + Ports.DRONE_SS);
         } catch (IOException e) {
-            e.printStackTrace();
-            System.exit(1);
+            throw new IllegalStateException("Failed to initialize drone sockets", e);
         }
     }
     @Override
     public void run() {
+        if (scheduler != null) {
+            runInProcess();
+            return;
+        }
         sendToScheduler(UDPMessage.droneIdle(droneId));
         updateDroneState(DroneState.IDLE.name(), null);
         while (!Thread.currentThread().isInterrupted()) {
@@ -81,6 +92,76 @@ public class DroneSubsystem implements Runnable {
                 Thread.currentThread().interrupt();
                 break;
             }
+        }
+    }
+    private void runInProcess() {
+        updateInProcessDroneState(DroneState.IDLE.name(), null);
+        while (!Thread.currentThread().isInterrupted()) {
+            Incident incident = scheduler.requestWork(droneId);
+            if (incident == null) {
+                break;
+            }
+            try {
+                executeIncident(incident, true);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+    }
+    private void executeIncident(Incident incident, boolean inProcess) throws InterruptedException {
+        System.out.println("[Drone " + droneId + "] Assigned incident: " + incident);
+        double travelTime = calculateTravelTime(incident.getZoneId());
+        System.out.println("[Drone " + droneId + "] Traveling to incident. Time: " + travelTime + " seconds");
+        if (inProcess) {
+            updateInProcessDroneState(DroneState.EN_ROUTE.name(), incident.getZoneId());
+        } else {
+            updateDroneState(DroneState.EN_ROUTE.name(), incident.getZoneId());
+        }
+        useBattery(travelTime);
+        sleepSeconds(travelTime);
+        if (inProcess) {
+            scheduler.reportArrival(droneId, incident);
+        } else {
+            sendToScheduler(UDPMessage.droneArrived(droneId, incident));
+        }
+        int litresNeeded = incident.getSeverity();
+        int litresUsed = Math.min(litresNeeded, agentRemaining);
+        agentRemaining -= litresUsed;
+        double extinguishTime = calculateExtinguishTime(litresUsed);
+        System.out.println("[Drone " + droneId + "] Extinguishing fire. Used: "
+                + litresUsed + "L. Time:" + extinguishTime + "seconds");
+        if (inProcess) {
+            updateInProcessDroneState(DroneState.EXTINGUISHING.name(), incident.getZoneId());
+        } else {
+            updateDroneState(DroneState.EXTINGUISHING.name(), incident.getZoneId());
+        }
+        useBattery(extinguishTime);
+        sleepSeconds(extinguishTime);
+        if (inProcess) {
+            scheduler.reportCompletion(droneId, incident);
+        } else {
+            sendToScheduler(UDPMessage.droneDroppedAgent(droneId, incident));
+        }
+        System.out.println("[Drone " + droneId + "] Incident completed: " + incident);
+        double returnTime = calculateTravelTime(incident.getZoneId());
+        System.out.println("[Drone " + droneId + "] Returning to base. Time: " + returnTime + " seconds");
+        if (inProcess) {
+            updateInProcessDroneState(DroneState.RETURNING.name(), null);
+            scheduler.reportReturnToBase(droneId);
+        } else {
+            updateDroneState(DroneState.RETURNING.name(), null);
+            sendToScheduler(UDPMessage.droneReturning(droneId));
+        }
+        useBattery(returnTime);
+        sleepSeconds(returnTime);
+        agentRemaining = (int) MAX_AGENT;
+        batteryRemaining = MAX_BATTERY;
+        if (inProcess) {
+            updateInProcessDroneState(DroneState.IDLE.name(), null);
+        } else {
+            sendToScheduler(UDPMessage.droneIdle(droneId));
+            updateDroneState(DroneState.IDLE.name(), null);
         }
     }
     private Incident waitForDispatch() {
@@ -131,6 +212,9 @@ public class DroneSubsystem implements Runnable {
     }
     private void updateDroneState(String state, Integer zoneId) {
         sendToScheduler(UDPMessage.droneState(droneId, state, zoneId));
+    }
+    private void updateInProcessDroneState(String state, Integer zoneId) {
+        scheduler.updateDroneState(droneId, state, zoneId);
     }
     private double calculateTravelTime(int zoneId) {
         double distance = zoneId * 100.0;
