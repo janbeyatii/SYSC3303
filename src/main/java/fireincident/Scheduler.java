@@ -1,14 +1,17 @@
 package fireincident;
 
 import model.Incident;
-import udp.MessageType;
-import udp.Ports;
-import udp.UDPMessage;
+import fireincident.udp.MessageType;
+import fireincident.udp.Ports;
+import fireincident.udp.UDPMessage;
+import fireincident.udp.DronePacketBuilder;
 
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 public class Scheduler implements Runnable, SchedulerInterface {
@@ -35,9 +38,12 @@ public class Scheduler implements Runnable, SchedulerInterface {
     private final Map<Integer, String> droneStateById = new HashMap<>();
     private final Map<Integer, Integer> droneZoneById = new HashMap<>();
     private final LinkedList<Integer> idleDrones = new LinkedList<>();
+    /** For channel protocol: where to send ASSIGN to each drone (enables multiple drone processes). */
+    private final Map<Integer, InetSocketAddress> droneAddresses = new HashMap<>();
 
     private volatile boolean running = true;
     private final boolean udpEnabled;
+    private volatile boolean fireIncidentFinished = false;
 
     public Scheduler() {
         this(false);
@@ -54,7 +60,10 @@ public class Scheduler implements Runnable, SchedulerInterface {
             System.out.println("[Scheduler] Bound to port " + Ports.SCHEDULER);
             System.out.println("[Scheduler] Waiting for packets...\n");
         } catch (IOException e) {
-            throw new IllegalStateException("Failed to initialize scheduler sockets", e);
+            String hint = (e instanceof java.net.BindException)
+                    ? " Port " + Ports.SCHEDULER + " is already in use. Close any other running Scheduler/Main/Drone process or wait a few seconds and try again."
+                    : "";
+            throw new IllegalStateException("Failed to initialize scheduler sockets." + hint, e);
         }
     }
 
@@ -68,8 +77,19 @@ public class Scheduler implements Runnable, SchedulerInterface {
                 byte[] data = new byte[UDPMessage.MAX_SIZE];
                 receivePacket = new DatagramPacket(data, data.length);
                 receiveSocket.receive(receivePacket);
-                UDPMessage msg = UDPMessage.fromString(new String(data, 0, receivePacket.getLength()).trim());
-                handleMessage(msg);
+                int len = receivePacket.getLength();
+                String line = new String(data, 0, len, StandardCharsets.UTF_8).trim();
+                InetAddress fromAddr = receivePacket.getAddress();
+                int fromPort = receivePacket.getPort();
+
+                String firstToken = line.contains("|") ? line.substring(0, line.indexOf('|')) : line;
+                try {
+                    MessageType.valueOf(firstToken);
+                    UDPMessage msg = UDPMessage.fromString(line);
+                    handleMessage(msg);
+                } catch (IllegalArgumentException e) {
+                    handleChannelMessage(line, fromAddr, fromPort);
+                }
             } catch (IOException e) {
                 if (running) e.printStackTrace();
             }
@@ -79,14 +99,42 @@ public class Scheduler implements Runnable, SchedulerInterface {
 
     private synchronized void handleMessage(UDPMessage msg) throws IOException {
         switch (msg.getType()) {
-            case INCIDENT_REPORT -> handleIncidentReport(msg);
-            case DRONE_ARRIVED -> handleDroneArrived(msg);
-            case DRONE_DROPPED_AGENT -> handleDroneDroppedAgent(msg);
-            case DRONE_RETURNING -> handleDroneReturning(msg);
-            case DRONE_IDLE -> handleDroneIdle(msg);
-            case DRONE_STATE -> handleDroneState(msg);
-            case SHUTDOWN -> running = false;
-            default -> System.out.println("[Scheduler] Unknown packet: " + msg.getType());
+            case INCIDENT_REPORT:
+                handleIncidentReport(msg);
+                break;
+
+            case DRONE_ARRIVED:
+                handleDroneArrived(msg);
+                break;
+
+            case DRONE_DROPPED_AGENT:
+                handleDroneDroppedAgent(msg);
+                break;
+
+            case DRONE_RETURNING:
+                handleDroneReturning(msg);
+                break;
+
+            case DRONE_IDLE:
+                handleDroneIdle(msg);
+                break;
+
+            case DRONE_STATE:
+                handleDroneState(msg);
+                break;
+
+            case NO_MORE_INCIDENTS:
+                fireIncidentFinished = true;
+                fireLog("[Scheduler] Fire Incident Subsystem finished; no more incidents.");
+                checkShutdown();
+                break;
+
+            case SHUTDOWN:
+                running = false;
+                break;
+
+            default:
+                System.out.println("[Scheduler] Unknown packet: " + msg.getType());
         }
     }
 
@@ -126,6 +174,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
         }
         schedulerState = queue.isEmpty() ? SchedulerState.IDLE : SchedulerState.HAS_PENDING;
         dispatchPending();
+        checkShutdown();
     }
 
     private void handleDroneReturning(UDPMessage msg) {
@@ -156,16 +205,168 @@ public class Scheduler implements Runnable, SchedulerInterface {
         updateDroneState(droneId, state, zoneId);
     }
 
-    private void dispatchPending() throws IOException {
+    private void handleChannelMessage(String line, InetAddress fromAddr, int fromPort) throws IOException {
+        String[] parts = line.split("\\|", -1);
+        if (parts.length == 0) return;
+        String type = parts[0].trim();
+        switch (type) {
+            case "REQUEST_WORK":
+                handleChannelRequestWork(parts, fromAddr, fromPort);
+                break;
+            case "REPORT_ARRIVAL":
+                handleChannelReportArrival(parts, fromAddr, fromPort);
+                break;
+            case "REPORT_COMPLETION":
+                handleChannelReportCompletion(parts, fromAddr, fromPort);
+                break;
+            case "REPORT_RETURN":
+                handleChannelReportReturn(parts, fromAddr, fromPort);
+                break;
+            case "REPORT_STATE":
+                handleChannelReportState(parts, fromAddr, fromPort);
+                break;
+            case "PEEK":
+                handleChannelPeek(fromAddr, fromPort);
+                break;
+            default:
+                System.out.println("[Scheduler] Unknown channel packet: " + type);
+        }
+    }
+
+    private void recordDroneAddress(int droneId, InetAddress fromAddr, int fromPort) {
+        droneAddresses.put(droneId, new InetSocketAddress(fromAddr, fromPort));
+    }
+
+    private void handleChannelRequestWork(String[] parts, InetAddress fromAddr, int fromPort) throws IOException {
+        if (parts.length < 2) return;
+        int droneId = Integer.parseInt(parts[1].trim());
+        recordDroneAddress(droneId, fromAddr, fromPort);
+        if (!idleDrones.contains(droneId)) {
+            idleDrones.add(droneId);
+        }
+        updateDroneState(droneId, DroneState.IDLE.name(), droneZoneById.get(droneId));
+        Job job = queue.isEmpty() ? null : queue.removeFirst();
+        if (job != null) {
+            idleDrones.remove((Integer) droneId);
+            inProgressByZone.put(job.incident.getZoneId(), job);
+            fireStates.put(job.incident.getKey(), FireState.ASSIGNED);
+            schedulerState = SchedulerState.DRONE_BUSY;
+            fireLog("[Scheduler] Dispatching Drone " + droneId + " to Incident: " + job.incident);
+            sendToAddress(DronePacketBuilder.assignIncident(job.incident), fromAddr, fromPort);
+            fireIncidentDispatched(droneId, job.incident);
+            dispatchPending();
+        } else {
+            sendToAddress(DronePacketBuilder.assignNoWork(), fromAddr, fromPort);
+        }
+    }
+
+    private void handleChannelReportArrival(String[] parts, InetAddress fromAddr, int fromPort) throws IOException {
+        if (parts.length < 6) return;
+        int droneId = Integer.parseInt(parts[1].trim());
+        recordDroneAddress(droneId, fromAddr, fromPort);
+        Incident incident = new Incident(parts[2].trim(), Integer.parseInt(parts[3].trim()), parts[4].trim(), Integer.parseInt(parts[5].trim()));
+        fireLog("[Scheduler] Drone " + droneId + " arrived at zone for " + incident.getKey());
+        updateDroneState(droneId, "ARRIVED", incident.getZoneId());
+        sendToAddress(DronePacketBuilder.ack(), fromAddr, fromPort);
+    }
+
+    private void handleChannelReportCompletion(String[] parts, InetAddress fromAddr, int fromPort) throws IOException {
+        if (parts.length < 6) return;
+        int droneId = Integer.parseInt(parts[1].trim());
+        recordDroneAddress(droneId, fromAddr, fromPort);
+        Incident incident = new Incident(parts[2].trim(), Integer.parseInt(parts[3].trim()), parts[4].trim(), Integer.parseInt(parts[5].trim()));
+        Job job = inProgressByZone.remove(incident.getZoneId());
+        fireLog("[Scheduler] Drone " + droneId + " finished at: " + incident.getKey());
+        if (job != null) {
+            fireStates.put(job.incident.getKey(), FireState.COMPLETED);
+            fireIncidentCompleted(droneId, job.incident);
+            sendToPort(UDPMessage.incidentCompleted(job.incident), Ports.FIRE_IS);
+        }
+        schedulerState = queue.isEmpty() ? SchedulerState.IDLE : SchedulerState.HAS_PENDING;
+        dispatchPending();
+        checkShutdown();
+        sendToAddress(DronePacketBuilder.ack(), fromAddr, fromPort);
+    }
+
+    private void handleChannelReportReturn(String[] parts, InetAddress fromAddr, int fromPort) throws IOException {
+        if (parts.length < 2) return;
+        int droneId = Integer.parseInt(parts[1].trim());
+        recordDroneAddress(droneId, fromAddr, fromPort);
+        fireLog("[Scheduler] Drone " + droneId + " returning to base.");
+        updateDroneState(droneId, DroneState.RETURNING.name(), null);
+        sendToAddress(DronePacketBuilder.ack(), fromAddr, fromPort);
+    }
+
+    private void handleChannelReportState(String[] parts, InetAddress fromAddr, int fromPort) throws IOException {
+        if (parts.length < 3) return;
+        int droneId = Integer.parseInt(parts[1].trim());
+        recordDroneAddress(droneId, fromAddr, fromPort);
+        String state = parts[2].trim();
+        String zoneStr = parts.length > 3 ? parts[3].trim() : "";
+        Integer zoneId = zoneStr.isEmpty() ? null : Integer.parseInt(zoneStr);
+        updateDroneState(droneId, state, zoneId);
+        if (state.equals(DroneState.IDLE.name()) && !idleDrones.contains(droneId)) {
+            idleDrones.add(droneId);
+        }
+        dispatchPending();
+        checkShutdown();
+        sendToAddress(DronePacketBuilder.ack(), fromAddr, fromPort);
+    }
+
+    private void handleChannelPeek(InetAddress fromAddr, int fromPort) throws IOException {
+        Incident next = queue.isEmpty() ? null : queue.getFirst().incident;
+        String line = next != null
+                ? "PEEK_RESP|" + next.getTime() + "|" + next.getZoneId() + "|" + next.getEventType() + "|" + next.getSeverity()
+                : "PEEK_RESP";
+        sendToAddress(line.getBytes(StandardCharsets.UTF_8), fromAddr, fromPort);
+    }
+
+    private void checkShutdown() {
+        if (!udpEnabled || sendSocket == null) return;
+        if (!fireIncidentFinished || !queue.isEmpty() || !inProgressByZone.isEmpty()) return;
+        if (!allDronesIdle()) return;
+        fireLog("[Scheduler] All fires out, all drones at base. Shutting down.");
+        for (SchedulerListener l : listeners) l.onSimulationComplete();
+        sendShutdownToDrones();
+        running = false;
+    }
+
+    private boolean allDronesIdle() {
+        if (droneStateById.isEmpty()) return false;
+        for (String state : droneStateById.values()) {
+            if (state == null || !DroneState.IDLE.name().equals(state)) return false;
+        }
+        return true;
+    }
+
+    private void sendShutdownToDrones() {
+        try {
+            sendToPort(UDPMessage.shutdown(), Ports.DRONE_SS);
+        } catch (IOException e) {
+            System.err.println("[Scheduler] Failed to send SHUTDOWN to drone port: " + e.getMessage());
+        }
+        for (Integer droneId : droneAddresses.keySet()) {
+            try {
+                InetSocketAddress addr = droneAddresses.get(droneId);
+                if (addr != null)
+                    sendToAddress(UDPMessage.shutdown().toBytes(), addr.getAddress(), addr.getPort());
+            } catch (IOException e) {
+                System.err.println("[Scheduler] Failed to send SHUTDOWN to drone " + droneId + ": " + e.getMessage());
+            }
+        }
+    }
+
+    /** Returns the droneId that was assigned work, or null if none. Only assigns to push drones (no address). */
+    private Integer dispatchPending() throws IOException {
         System.out.println("[Scheduler] Dispatching pending incidents...");
+        Integer lastAssigned = null;
         while (!queue.isEmpty() && !idleDrones.isEmpty()) {
-            Job job = queue.removeFirst();
-            int droneId = selectBestDrone(job.incident.getZoneId());
+            Job job = queue.getFirst();
+            int droneId = selectBestPushDrone(job.incident.getZoneId());
             if (droneId == -1) {
-                System.out.println("[Scheduler] No suitable drone found for incident: " + job.incident);
-                queue.addFirst(job); // Requeue if no suitable drone found
                 break;
             }
+            queue.removeFirst();
             idleDrones.remove((Integer) droneId);
             inProgressByZone.put(job.incident.getZoneId(), job);
             fireStates.put(job.incident.getKey(), FireState.ASSIGNED);
@@ -174,7 +375,31 @@ public class Scheduler implements Runnable, SchedulerInterface {
             System.out.println("[Scheduler] Dispatching Drone " + droneId + " to Incident: " + job.incident);
             sendToPort(UDPMessage.dispatchDrone(droneId, job.incident), Ports.DRONE_SS);
             fireIncidentDispatched(droneId, job.incident);
+            lastAssigned = droneId;
         }
+        return lastAssigned;
+    }
+
+    private int selectBestPushDrone(int zoneId) {
+        int best = -1;
+        double minDist = Double.MAX_VALUE;
+        for (int droneId : idleDrones) {
+            if (droneAddresses.containsKey(droneId)) continue;
+            Integer zone = droneZoneById.get(droneId);
+            if (zone == null) zone = 0;
+            double d = Math.abs(zone - zoneId);
+            if (d < minDist) {
+                minDist = d;
+                best = droneId;
+            }
+        }
+        return best;
+    }
+
+    private void sendToAddress(byte[] data, InetAddress addr, int port) throws IOException {
+        if (sendSocket == null) return;
+        sendPacket = new DatagramPacket(data, data.length, addr, port);
+        sendSocket.send(sendPacket);
     }
 
     private int selectBestDrone(int zoneId) {
@@ -184,7 +409,8 @@ public class Scheduler implements Runnable, SchedulerInterface {
 
         for (int droneId : idleDrones) {
             Integer droneZone = droneZoneById.get(droneId);
-            double distance = (droneZone == null) ? Double.MAX_VALUE : Math.abs(droneZone - zoneId);
+            if (droneZone == null) droneZone = 0;
+            double distance = Math.abs(droneZone - zoneId);
             System.out.println("[Scheduler] Drone " + droneId + " at zone " + droneZone + " with distance " + distance);
             if (distance < minDistance) {
                 minDistance = distance;
@@ -249,6 +475,14 @@ public class Scheduler implements Runnable, SchedulerInterface {
 
     public synchronized Incident peekNextIncident() {
         return queue.isEmpty() ? null : queue.getFirst().incident;
+    }
+
+    @Override
+    public synchronized void signalNoMoreIncidents() {
+        fireIncidentFinished = true;
+        try {
+            checkShutdown();
+        } catch (Exception ignored) { }
     }
 
     @Override

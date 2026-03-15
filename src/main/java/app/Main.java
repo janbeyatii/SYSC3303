@@ -1,6 +1,5 @@
 package app;
 
-import fireincident.FireIncidentSubsystem;
 import fireincident.Scheduler;
 import fireincident.DroneSubsystem;
 

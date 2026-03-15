@@ -52,6 +52,10 @@ public class DroneSubsystemTest {
             @Override
             public void onLog(String message) {
             }
+
+            @Override
+            public void onSimulationComplete() {
+            }
         });
 
         Incident incident1 = new Incident("14:03:15", 3, "FIRE_DETECTED", 30);

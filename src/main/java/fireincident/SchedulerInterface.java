@@ -9,4 +9,6 @@ import model.Incident;
  */
 public interface SchedulerInterface {
     void receiveIncident(Incident incident, IncidentCallback callback);
+    /** Called when the Fire Incident Subsystem has finished sending all incidents (in-process mode). */
+    void signalNoMoreIncidents();
 }

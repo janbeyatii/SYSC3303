@@ -38,5 +38,20 @@ public final class DronePacketBuilder {
         return ("REPORT_STATE" + SEP + droneId + SEP + state + SEP + z).getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
+    /** Response to REQUEST_WORK: assign an incident to the drone. */
+    public static byte[] assignIncident(Incident incident) {
+        return ("ASSIGN" + SEP + incident.getTime() + SEP + incident.getZoneId()
+                + SEP + incident.getEventType() + SEP + incident.getSeverity()).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /** Response to REQUEST_WORK: no work available. */
+    public static byte[] assignNoWork() {
+        return "ASSIGN".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    public static byte[] ack() {
+        return "ACK".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
     private DronePacketBuilder() {}
 }

@@ -1,4 +1,4 @@
-package udp;
+package fireincident.udp;
 
 public enum MessageType {
     INCIDENT_REPORT,
@@ -9,5 +9,6 @@ public enum MessageType {
     DRONE_IDLE,
     DRONE_STATE,
     INCIDENT_COMPLETED,
+    NO_MORE_INCIDENTS,
     SHUTDOWN
 }
