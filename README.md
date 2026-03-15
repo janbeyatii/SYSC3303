@@ -19,7 +19,7 @@ Use .bat files
 **2. Using IntelliJ IDEA:**
 Run `Main.java`
 
-4. We are using the sample event CSV file provided to us from the course page. 
+We are using the sample event CSV file provided to us from the course page. 
 
 CSV FILE FORMAT:
 The CSV should look like this:

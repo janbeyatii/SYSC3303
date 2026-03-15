@@ -1,5 +1,5 @@
 
-package udp;
+package fireincident.udp;
 
 public final class Ports {
     public static final int SCHEDULER = 5000;

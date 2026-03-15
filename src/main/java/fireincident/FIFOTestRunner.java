@@ -1,9 +1,9 @@
 package fireincident;
 
 import model.Incident;
-import udp.MessageType;
-import udp.Ports;
-import udp.UDPMessage;
+import fireincident.udp.MessageType;
+import fireincident.udp.Ports;
+import fireincident.udp.UDPMessage;
 
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;

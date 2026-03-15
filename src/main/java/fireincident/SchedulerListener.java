@@ -12,4 +12,6 @@ public interface SchedulerListener {
     void onIncidentCompleted(int droneId, Incident incident);
     void onDroneStateChanged(int droneId, String state, Integer zoneId);
     void onLog(String message);
+    /** Called when all incidents are done and all drones at base; scheduler is shutting down. */
+    void onSimulationComplete();
 }

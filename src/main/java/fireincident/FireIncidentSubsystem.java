@@ -1,9 +1,9 @@
 package fireincident;
 
 import model.Incident;
-import udp.MessageType;
-import udp.Ports;
-import udp.UDPMessage;
+import fireincident.udp.MessageType;
+import fireincident.udp.Ports;
+import fireincident.udp.UDPMessage;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -27,14 +27,30 @@ public class FireIncidentSubsystem implements Runnable {
 
     private String csvFilePath;
     private final SchedulerInterface scheduler;
+    private final String udpSchedulerHost;
+    private final int udpSchedulerPort;
 
     public FireIncidentSubsystem(String csvFilePath) {
         this(csvFilePath, null);
     }
 
     public FireIncidentSubsystem(String csvFilePath, SchedulerInterface scheduler) {
+        this(csvFilePath, scheduler, null, -1);
+    }
+
+    /**
+     * UDP-only constructor for running as a separate process (e.g. from FireIncidentMain).
+     * Sends incidents to the given scheduler host and port.
+     */
+    public FireIncidentSubsystem(String csvFilePath, String schedulerHost, int schedulerPort) {
+        this(csvFilePath, null, schedulerHost, schedulerPort);
+    }
+
+    private FireIncidentSubsystem(String csvFilePath, SchedulerInterface scheduler, String schedulerHost, int schedulerPort) {
         this.csvFilePath = csvFilePath;
         this.scheduler = scheduler;
+        this.udpSchedulerHost = schedulerHost;
+        this.udpSchedulerPort = schedulerPort;
         if (scheduler != null) {
             return;
         }
@@ -84,6 +100,11 @@ public class FireIncidentSubsystem implements Runnable {
                 lineNumber++;
             }
             System.out.println("[FireIncidentSubsystem] Finished processing CSV file. Total lines processed: " + (lineNumber - 2));
+            if (scheduler != null) {
+                scheduler.signalNoMoreIncidents();
+            } else {
+                sendNoMoreIncidents();
+            }
         } catch (IOException e) {
             System.err.println("[FireIncidentSubsystem] Error reading CSV file: " + e.getMessage());
             e.printStackTrace();
@@ -96,8 +117,11 @@ public class FireIncidentSubsystem implements Runnable {
         }
         try {
             byte[] msg = UDPMessage.incidentReport(incident).toBytes();
-            sendPacket = new DatagramPacket(msg, msg.length,
-                    InetAddress.getLocalHost(), Ports.SCHEDULER);
+            InetAddress destAddr = (udpSchedulerHost != null && !udpSchedulerHost.isEmpty())
+                    ? InetAddress.getByName(udpSchedulerHost)
+                    : InetAddress.getLocalHost();
+            int destPort = udpSchedulerPort > 0 ? udpSchedulerPort : Ports.SCHEDULER;
+            sendPacket = new DatagramPacket(msg, msg.length, destAddr, destPort);
             System.out.println("[FireIncidentSubsystem] Sending packet:");
             System.out.println("To host: " + sendPacket.getAddress());
             System.out.println("Destination host port: " + sendPacket.getPort());
@@ -106,10 +130,27 @@ public class FireIncidentSubsystem implements Runnable {
             System.out.println(new String(sendPacket.getData(), 0, sendPacket.getLength()));
             sendSocket.send(sendPacket);
             System.out.println("[FireIncidentSubsystem] Packet sent.\n");
-        }catch (IOException e) {
+        } catch (IOException e) {
             e.printStackTrace();
         }
     }
+
+    private void sendNoMoreIncidents() {
+        if (sendSocket == null) return;
+        try {
+            InetAddress destAddr = (udpSchedulerHost != null && !udpSchedulerHost.isEmpty())
+                    ? InetAddress.getByName(udpSchedulerHost)
+                    : InetAddress.getLocalHost();
+            int destPort = udpSchedulerPort > 0 ? udpSchedulerPort : Ports.SCHEDULER;
+            byte[] msg = UDPMessage.noMoreIncidents().toBytes();
+            sendPacket = new DatagramPacket(msg, msg.length, destAddr, destPort);
+            sendSocket.send(sendPacket);
+            System.out.println("[FireIncidentSubsystem] Sent NO_MORE_INCIDENTS to scheduler.");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
     private void receiveLoop() {
         while (true) {
             try {

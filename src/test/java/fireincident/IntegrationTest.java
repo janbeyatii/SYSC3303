@@ -5,8 +5,9 @@ import org.junit.After;
 import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
-import udp.Ports;
-import udp.UDPMessage;
+import fireincident.udp.MessageType;
+import fireincident.udp.Ports;
+import fireincident.udp.UDPMessage;
 
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -56,7 +57,7 @@ public class IntegrationTest {
             droneSocket.receive(dispatchPacket);
             UDPMessage dispatch = UDPMessage.fromBytes(dispatchPacket.getData(), dispatchPacket.getLength());
 
-            assertEquals(udp.MessageType.DISPATCH_DRONE, dispatch.getType());
+            assertEquals(MessageType.DISPATCH_DRONE, dispatch.getType());
             assertEquals("1", dispatch.getField(0));
             assertEquals(String.valueOf(incident.getZoneId()), dispatch.getField(2));
 

@@ -29,11 +29,12 @@ public class FireIncidentSubsystemTest {
             @Override
             public void receiveIncident(Incident incident, IncidentCallback callback) {
                 receivedIncidents.add(incident);
-                // Simulate completion so callback is exercised
                 if (callback != null) {
                     callback.onIncidentCompleted(incident);
                 }
             }
+            @Override
+            public void signalNoMoreIncidents() { }
         };
     }
 
