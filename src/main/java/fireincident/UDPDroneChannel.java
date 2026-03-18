@@ -33,10 +33,15 @@ public class UDPDroneChannel implements IDroneSchedulerChannel {
 
     @Override
     public Incident requestWork(int droneId) {
+        return requestWork(droneId, 0, 100);
+    }
+
+    @Override
+    public Incident requestWork(int droneId, int currentZone, int agentRemaining) {
         sendReceiveLock.lock();
         try (DatagramSocket socket = new DatagramSocket()) {
             socket.setSoTimeout(SOCKET_TIMEOUT_MS);
-            byte[] req = DronePacketBuilder.requestWork(droneId);
+            byte[] req = DronePacketBuilder.requestWork(droneId, currentZone, agentRemaining);
             send(socket, req);
             byte[] resp = receive(socket);
             DronePacketParser.Response r = DronePacketParser.parse(resp);

@@ -11,6 +11,11 @@ public interface IDroneSchedulerChannel {
     /** Block until work is available; returns the assigned incident or null if interrupted. */
     Incident requestWork(int droneId);
 
+    /** Request work from current zone with remaining agent (for multi-zone routing per spec). */
+    default Incident requestWork(int droneId, int currentZone, int agentRemaining) {
+        return requestWork(droneId);
+    }
+
     /** Next incident in queue without removing it; null if queue empty. */
     Incident peekNextIncident();
 
