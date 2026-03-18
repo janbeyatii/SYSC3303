@@ -13,6 +13,8 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Main class for Fire Incident Subsystem.
@@ -20,6 +22,9 @@ import java.net.InetAddress;
  * handles callbacks when incidents are completed.
  */
 public class FireIncidentSubsystem implements Runnable {
+    /** Set to true for verbose packet-level debug logging. */
+    private static final boolean DEBUG_PACKETS = false;
+
     DatagramPacket sendPacket;
     DatagramSocket sendSocket;
     DatagramPacket receivePacket;
@@ -29,6 +34,8 @@ public class FireIncidentSubsystem implements Runnable {
     private final SchedulerInterface scheduler;
     private final String udpSchedulerHost;
     private final int udpSchedulerPort;
+    /** Tracks incident keys we sent, for verification when drone completes. */
+    private final Set<String> pendingIncidentKeys = new HashSet<>();
 
     public FireIncidentSubsystem(String csvFilePath) {
         this(csvFilePath, null);
@@ -111,8 +118,13 @@ public class FireIncidentSubsystem implements Runnable {
         }
     }
     private void sendIncident(Incident incident) {
+        pendingIncidentKeys.add(incident.getKey());
         if (scheduler != null) {
-            scheduler.receiveIncident(incident, null);
+            IncidentCallback wrap = c -> {
+                pendingIncidentKeys.remove(c.getKey());
+                System.out.println("[FireIncidentSubsystem] CONFIRMED: Fire zone received assistance - drone arrived and used agent for: " + c.getKey());
+            };
+            scheduler.receiveIncident(incident, wrap);
             return;
         }
         try {
@@ -122,14 +134,10 @@ public class FireIncidentSubsystem implements Runnable {
                     : InetAddress.getLocalHost();
             int destPort = udpSchedulerPort > 0 ? udpSchedulerPort : Ports.SCHEDULER;
             sendPacket = new DatagramPacket(msg, msg.length, destAddr, destPort);
-            System.out.println("[FireIncidentSubsystem] Sending packet:");
-            System.out.println("To host: " + sendPacket.getAddress());
-            System.out.println("Destination host port: " + sendPacket.getPort());
-            System.out.println("Length: " + sendPacket.getLength());
-            System.out.print("Containing: ");
-            System.out.println(new String(sendPacket.getData(), 0, sendPacket.getLength()));
+            if (DEBUG_PACKETS) {
+                System.out.println("[FireIncidentSubsystem] Sending to " + destAddr + ":" + destPort + ": " + new String(msg));
+            }
             sendSocket.send(sendPacket);
-            System.out.println("[FireIncidentSubsystem] Packet sent.\n");
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -156,21 +164,22 @@ public class FireIncidentSubsystem implements Runnable {
             try {
                 byte[] data = new byte[UDPMessage.MAX_SIZE];
                 receivePacket = new DatagramPacket(data, data.length);
-                System.out.println("[FireIncidentSubsystem] Waiting for packet...");
                 receiveSocket.receive(receivePacket);
-                System.out.println("[FireIncidentSubsystem] Packet received:");
-                System.out.println("From host: " + receivePacket.getAddress());
-                System.out.println("Host port: " + receivePacket.getPort());
                 int len = receivePacket.getLength();
-                System.out.println("Length: " + len);
-                System.out.print("Containing: ");
                 String received = new String(data, 0, len);
-                System.out.println(received);
-
+                if (DEBUG_PACKETS) {
+                    System.out.println("[FireIncidentSubsystem] Received from " + receivePacket.getAddress() + ":" + receivePacket.getPort() + ": " + received.trim());
+                }
                 UDPMessage msg = UDPMessage.fromString(received.trim());
 
                 if (msg.getType() == MessageType.INCIDENT_COMPLETED) {
-                    System.out.println("[FireIncidentSubsystem] Received completion notification for: " + msg.getField(0));
+                    // Key is time|zoneId|eventType; wire format splits by | so reconstruct from fields 0,1,2
+                    String incidentKey = msg.getField(0) + "|" + msg.getField(1) + "|" + msg.getField(2);
+                    if (pendingIncidentKeys.remove(incidentKey)) {
+                        System.out.println("[FireIncidentSubsystem] CONFIRMED: Fire zone received assistance - drone arrived and used agent for: " + incidentKey);
+                    } else {
+                        System.err.println("[FireIncidentSubsystem] WARNING: Received completion for unknown incident: " + incidentKey);
+                    }
                 } else if (msg.getType() == MessageType.SHUTDOWN) {
                     System.out.println("[FireIncidentSubsystem] Shutdown received.");
                     break;
@@ -183,16 +192,17 @@ public class FireIncidentSubsystem implements Runnable {
         }
     }
     /**
-     * Takes a line from the CSV and turns it into an Incident object.
-     * Format should be: time,zoneId,eventType,severity
-     * Severity can be a number (1-5) or words like "High", "Moderate", "Low"
+     * Parses a line into an Incident object.
+     * Supports both formats per spec:
+     * - Whitespace-separated: time zoneId eventType severity (e.g. "14:03:15 3 FIRE_DETECTED High")
+     * - Comma-separated (CSV): time,zoneId,eventType,severity
      */
     private Incident parseIncident(String line, int lineNumber) {
         if (line == null || line.trim().isEmpty()) {
             System.out.println("[FireIncidentSubsystem] Skipping empty line " + lineNumber);
             return null;
         }
-        String[] parts = line.split(",");
+        String[] parts = line.contains(",") ? line.split(",") : line.trim().split("\\s+");
         if (parts.length < 4) {
             throw new IllegalArgumentException("Expected 4 fields but found " + parts.length);
         }

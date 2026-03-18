@@ -1,6 +1,7 @@
 package fireincident;
 
 import model.Incident;
+import model.ZoneConfig;
 import fireincident.udp.MessageType;
 import fireincident.udp.Ports;
 import fireincident.udp.UDPMessage;
@@ -27,12 +28,15 @@ public class Scheduler implements Runnable, SchedulerInterface {
     }
 
     public enum FireState { PENDING, ASSIGNED, COMPLETED }
-    public enum SchedulerState { IDLE, HAS_PENDING, DRONE_BUSY, WAITING_FOR_INCIDENT }
+    public enum SchedulerState { IDLE, HAS_PENDING, DRONE_BUSY }
 
     private SchedulerState schedulerState = SchedulerState.IDLE;
     private final Map<String, FireState> fireStates = new HashMap<>();
     private final Map<String, IncidentCallback> callbacksByKey = new HashMap<>();
-    private final LinkedList<Job> queue = new LinkedList<>();
+    /** FIFO queue of all pending jobs (spec/Iteration 2: process incidents in arrival order). */
+    private final LinkedList<Job> fifoQueue = new LinkedList<>();
+    /** Per zone+severity for tracking; dispatch order follows fifoQueue. */
+    private final Map<Integer, Map<Integer, LinkedList<Job>>> queuesByZoneAndSeverity = new HashMap<>();
     private final Map<Integer, Job> inProgressByZone = new HashMap<>();
     private final List<SchedulerListener> listeners = new ArrayList<>();
     private final Map<Integer, String> droneStateById = new HashMap<>();
@@ -44,21 +48,27 @@ public class Scheduler implements Runnable, SchedulerInterface {
     private volatile boolean running = true;
     private final boolean udpEnabled;
     private volatile boolean fireIncidentFinished = false;
+    private final ZoneConfig zoneConfig;
 
     public Scheduler() {
         this(false);
     }
 
     public Scheduler(boolean udpEnabled) {
+        this(udpEnabled, new ZoneConfig());
+    }
+
+    public Scheduler(boolean udpEnabled, ZoneConfig zoneConfig) {
         this.udpEnabled = udpEnabled;
+        this.zoneConfig = zoneConfig != null ? zoneConfig : new ZoneConfig();
         if (!udpEnabled) {
             return;
         }
         try {
             sendSocket = new DatagramSocket();
             receiveSocket = new DatagramSocket(Ports.SCHEDULER);
-            System.out.println("[Scheduler] Bound to port " + Ports.SCHEDULER);
-            System.out.println("[Scheduler] Waiting for packets...\n");
+            fireLog("[Scheduler] Bound to port " + Ports.SCHEDULER);
+            fireLog("[Scheduler] Waiting for packets...\n");
         } catch (IOException e) {
             String hint = (e instanceof java.net.BindException)
                     ? " Port " + Ports.SCHEDULER + " is already in use. Close any other running Scheduler/Main/Drone process or wait a few seconds and try again."
@@ -94,7 +104,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
                 if (running) e.printStackTrace();
             }
         }
-        System.out.println("[Scheduler] Stopped.");
+        fireLog("[Scheduler] Stopped.");
     }
 
     private synchronized void handleMessage(UDPMessage msg) throws IOException {
@@ -134,7 +144,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
                 break;
 
             default:
-                System.out.println("[Scheduler] Unknown packet: " + msg.getType());
+                fireLog("[Scheduler] Unknown packet: " + msg.getType());
         }
     }
 
@@ -145,7 +155,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
                 msg.getField(2),
                 Integer.parseInt(msg.getField(3))
         );
-        queue.addLast(new Job(incident));
+        addToQueue(new Job(incident));
         fireStates.put(incident.getKey(), FireState.PENDING);
         schedulerState = SchedulerState.HAS_PENDING;
         fireLog("[Scheduler] Queued incident: " + incident);
@@ -156,7 +166,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
     private void handleDroneArrived(UDPMessage msg) {
         int droneId = Integer.parseInt(msg.getField(0));
         int zoneId = Integer.parseInt(msg.getField(2));
-        String key = msg.getField(1) + "|" + msg.getField(2) + "|" + msg.getField(3);
+        String key = incidentKeyFromFields(msg, 1);
         fireLog("[Scheduler] Drone " + droneId + " arrived at zone for " + key);
         updateDroneState(droneId, "ARRIVED", zoneId);
     }
@@ -164,7 +174,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
     private void handleDroneDroppedAgent(UDPMessage msg) throws IOException {
         int droneId = Integer.parseInt(msg.getField(0));
         int zoneId = Integer.parseInt(msg.getField(2));
-        String key = msg.getField(1) + "|" + msg.getField(2) + "|" + msg.getField(3);
+        String key = incidentKeyFromFields(msg, 1);
         Job job = inProgressByZone.remove(zoneId);
         fireLog("[Scheduler] Drone " + droneId + " finished at: " + key);
         if (job != null) {
@@ -172,7 +182,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
             fireIncidentCompleted(droneId, job.incident);
             sendToPort(UDPMessage.incidentCompleted(job.incident), Ports.FIRE_IS);
         }
-        schedulerState = queue.isEmpty() ? SchedulerState.IDLE : SchedulerState.HAS_PENDING;
+        schedulerState = hasAnyPending() ? SchedulerState.HAS_PENDING : SchedulerState.IDLE;
         dispatchPending();
         checkShutdown();
     }
@@ -185,15 +195,11 @@ public class Scheduler implements Runnable, SchedulerInterface {
 
     private void handleDroneIdle(UDPMessage msg) throws IOException {
         int droneId = Integer.parseInt(msg.getField(0));
-        Integer zoneId = droneZoneById.get(droneId); // Retrieve the last known zone of the drone
-        if (zoneId == null) {
-            zoneId = 0; // Default to base zone (e.g., 0) if no zone is known
-        }
-        System.out.println("[Scheduler] Drone " + droneId + " is now idle at zone " + zoneId);
+        fireLog("[Scheduler] Drone " + droneId + " is now idle at base (zone 0)");
         if (!idleDrones.contains(droneId)) {
             idleDrones.add(droneId);
         }
-        updateDroneState(droneId, DroneState.IDLE.name(), zoneId); // Update the drone's state and zone
+        updateDroneState(droneId, DroneState.IDLE.name(), 0); // Idle = at base (zone 0)
         dispatchPending();
     }
 
@@ -229,7 +235,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
                 handleChannelPeek(fromAddr, fromPort);
                 break;
             default:
-                System.out.println("[Scheduler] Unknown channel packet: " + type);
+                fireLog("[Scheduler] Unknown channel packet: " + type);
         }
     }
 
@@ -244,8 +250,17 @@ public class Scheduler implements Runnable, SchedulerInterface {
         if (!idleDrones.contains(droneId)) {
             idleDrones.add(droneId);
         }
-        updateDroneState(droneId, DroneState.IDLE.name(), droneZoneById.get(droneId));
-        Job job = queue.isEmpty() ? null : queue.removeFirst();
+        int currentZone = 0;
+        int agentRemaining = 100;
+        if (parts.length >= 4) {
+            try {
+                currentZone = Integer.parseInt(parts[2].trim());
+                agentRemaining = Integer.parseInt(parts[3].trim());
+                if (agentRemaining < 0) agentRemaining = 0;
+            } catch (NumberFormatException ignored) { }
+        }
+        updateDroneState(droneId, DroneState.IDLE.name(), currentZone);
+        Job job = pollNextJobForDrone(droneId, agentRemaining);
         if (job != null) {
             idleDrones.remove((Integer) droneId);
             inProgressByZone.put(job.incident.getZoneId(), job);
@@ -282,7 +297,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
             fireIncidentCompleted(droneId, job.incident);
             sendToPort(UDPMessage.incidentCompleted(job.incident), Ports.FIRE_IS);
         }
-        schedulerState = queue.isEmpty() ? SchedulerState.IDLE : SchedulerState.HAS_PENDING;
+        schedulerState = hasAnyPending() ? SchedulerState.HAS_PENDING : SchedulerState.IDLE;
         dispatchPending();
         checkShutdown();
         sendToAddress(DronePacketBuilder.ack(), fromAddr, fromPort);
@@ -304,6 +319,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
         String state = parts[2].trim();
         String zoneStr = parts.length > 3 ? parts[3].trim() : "";
         Integer zoneId = zoneStr.isEmpty() ? null : Integer.parseInt(zoneStr);
+        if (DroneState.IDLE.name().equals(state)) zoneId = 0; // Idle = at base
         updateDroneState(droneId, state, zoneId);
         if (state.equals(DroneState.IDLE.name()) && !idleDrones.contains(droneId)) {
             idleDrones.add(droneId);
@@ -314,7 +330,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
     }
 
     private void handleChannelPeek(InetAddress fromAddr, int fromPort) throws IOException {
-        Incident next = queue.isEmpty() ? null : queue.getFirst().incident;
+        Incident next = peekNextIncident();
         String line = next != null
                 ? "PEEK_RESP|" + next.getTime() + "|" + next.getZoneId() + "|" + next.getEventType() + "|" + next.getSeverity()
                 : "PEEK_RESP";
@@ -323,7 +339,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
 
     private void checkShutdown() {
         if (!udpEnabled || sendSocket == null) return;
-        if (!fireIncidentFinished || !queue.isEmpty() || !inProgressByZone.isEmpty()) return;
+        if (!fireIncidentFinished || hasAnyPending() || !inProgressByZone.isEmpty()) return;
         if (!allDronesIdle()) return;
         fireLog("[Scheduler] All fires out, all drones at base. Shutting down.");
         for (SchedulerListener l : listeners) l.onSimulationComplete();
@@ -356,28 +372,83 @@ public class Scheduler implements Runnable, SchedulerInterface {
         }
     }
 
+    /** Extracts incident key (time|zoneId|eventType) from UDPMessage fields starting at given index. */
+    private static String incidentKeyFromFields(UDPMessage msg, int start) {
+        return msg.getField(start) + "|" + msg.getField(start + 1) + "|" + msg.getField(start + 2);
+    }
+
     /** Returns the droneId that was assigned work, or null if none. Only assigns to push drones (no address). */
     private Integer dispatchPending() throws IOException {
-        System.out.println("[Scheduler] Dispatching pending incidents...");
+        fireLog("[Scheduler] Dispatching pending incidents...");
         Integer lastAssigned = null;
-        while (!queue.isEmpty() && !idleDrones.isEmpty()) {
-            Job job = queue.getFirst();
-            int droneId = selectBestPushDrone(job.incident.getZoneId());
-            if (droneId == -1) {
-                break;
-            }
-            queue.removeFirst();
+        while (hasAnyPending() && !idleDrones.isEmpty()) {
+            NextJobResult next = getNextJobForDispatch();
+            if (next == null) break;
+            int droneId = selectBestPushDrone(next.zoneId);
+            if (droneId == -1) break;
             idleDrones.remove((Integer) droneId);
-            inProgressByZone.put(job.incident.getZoneId(), job);
-            fireStates.put(job.incident.getKey(), FireState.ASSIGNED);
+            inProgressByZone.put(next.job.incident.getZoneId(), next.job);
+            fireStates.put(next.job.incident.getKey(), FireState.ASSIGNED);
             schedulerState = SchedulerState.DRONE_BUSY;
 
-            System.out.println("[Scheduler] Dispatching Drone " + droneId + " to Incident: " + job.incident);
-            sendToPort(UDPMessage.dispatchDrone(droneId, job.incident), Ports.DRONE_SS);
-            fireIncidentDispatched(droneId, job.incident);
+            fireLog("[Scheduler] Dispatching Drone " + droneId + " to Incident: " + next.job.incident);
+            sendToPort(UDPMessage.dispatchDrone(droneId, next.job.incident), Ports.DRONE_SS);
+            fireIncidentDispatched(droneId, next.job.incident);
             lastAssigned = droneId;
         }
         return lastAssigned;
+    }
+
+    private static class NextJobResult {
+        final Job job;
+        final int zoneId;
+        NextJobResult(Job job, int zoneId) { this.job = job; this.zoneId = zoneId; }
+    }
+
+    private void addToQueue(Job job) {
+        int zoneId = job.incident.getZoneId();
+        int severity = job.incident.getSeverity();
+        queuesByZoneAndSeverity.computeIfAbsent(zoneId, k -> new HashMap<>())
+                .computeIfAbsent(severity, k -> new LinkedList<>())
+                .addLast(job);
+        fifoQueue.addLast(job);
+    }
+
+    private boolean hasAnyPending() {
+        return !fifoQueue.isEmpty();
+    }
+
+    /** FIFO: picks oldest pending job, assigns to closest idle drone. Returns null if none dispatchable. */
+    private NextJobResult getNextJobForDispatch() {
+        Job job = fifoQueue.peekFirst();
+        if (job == null) return null;
+        int zoneId = job.incident.getZoneId();
+        int droneId = selectBestPushDrone(zoneId);
+        if (droneId == -1) return null;
+        removeJobFromQueue(job);
+        return new NextJobResult(job, zoneId);
+    }
+
+    /** FIFO: gives drone the oldest job it can handle (agentRemaining >= severity). */
+    private Job pollNextJobForDrone(int droneId, int agentRemaining) {
+        for (Job job : fifoQueue) {
+            if (job.incident.getSeverity() <= agentRemaining) {
+                removeJobFromQueue(job);
+                return job;
+            }
+        }
+        return null;
+    }
+
+    private void removeJobFromQueue(Job job) {
+        int zoneId = job.incident.getZoneId();
+        int severity = job.incident.getSeverity();
+        Map<Integer, LinkedList<Job>> bySeverity = queuesByZoneAndSeverity.get(zoneId);
+        if (bySeverity != null) {
+            LinkedList<Job> q = bySeverity.get(severity);
+            if (q != null) q.removeFirstOccurrence(job);
+        }
+        fifoQueue.removeFirstOccurrence(job);
     }
 
     private int selectBestPushDrone(int zoneId) {
@@ -387,7 +458,12 @@ public class Scheduler implements Runnable, SchedulerInterface {
             if (droneAddresses.containsKey(droneId)) continue;
             Integer zone = droneZoneById.get(droneId);
             if (zone == null) zone = 0;
-            double d = Math.abs(zone - zoneId);
+            double d;
+            if (zoneConfig.hasZone(zone) && zoneConfig.hasZone(zoneId)) {
+                d = zoneConfig.getDistanceMeters(zone, zoneId);
+            } else {
+                d = Math.abs(zone - zoneId) * 100.0; // fallback
+            }
             if (d < minDist) {
                 minDist = d;
                 best = droneId;
@@ -400,25 +476,6 @@ public class Scheduler implements Runnable, SchedulerInterface {
         if (sendSocket == null) return;
         sendPacket = new DatagramPacket(data, data.length, addr, port);
         sendSocket.send(sendPacket);
-    }
-
-    private int selectBestDrone(int zoneId) {
-        System.out.println("[Scheduler] Selecting best drone for zone: " + zoneId);
-        int bestDrone = -1;
-        double minDistance = Double.MAX_VALUE;
-
-        for (int droneId : idleDrones) {
-            Integer droneZone = droneZoneById.get(droneId);
-            if (droneZone == null) droneZone = 0;
-            double distance = Math.abs(droneZone - zoneId);
-            System.out.println("[Scheduler] Drone " + droneId + " at zone " + droneZone + " with distance " + distance);
-            if (distance < minDistance) {
-                minDistance = distance;
-                bestDrone = droneId;
-            }
-        }
-        System.out.println("[Scheduler] Best drone selected: " + bestDrone);
-        return bestDrone;
     }
 
     private void sendToPort(UDPMessage message, int port) throws IOException {
@@ -437,7 +494,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
     }
 
     public synchronized int getQueueSize() {
-        return queue.size();
+        return fifoQueue.size();
     }
 
     public synchronized int getInProgressCount() {
@@ -474,7 +531,8 @@ public class Scheduler implements Runnable, SchedulerInterface {
     }
 
     public synchronized Incident peekNextIncident() {
-        return queue.isEmpty() ? null : queue.getFirst().incident;
+        Job j = fifoQueue.peekFirst();
+        return j != null ? j.incident : null;
     }
 
     @Override
@@ -487,7 +545,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
 
     @Override
     public synchronized void receiveIncident(Incident incident, IncidentCallback callback) {
-        queue.addLast(new Job(incident));
+        addToQueue(new Job(incident));
         fireStates.put(incident.getKey(), FireState.PENDING);
         if (callback != null) {
             callbacksByKey.put(incident.getKey(), callback);
@@ -499,8 +557,13 @@ public class Scheduler implements Runnable, SchedulerInterface {
     }
 
     public synchronized Incident requestWork(int droneId) {
-        updateDroneState(droneId, DroneState.IDLE.name(), null);
-        while (queue.isEmpty()) {
+        return requestWork(droneId, 0, 100);
+    }
+
+    /** Request work from current zone with remaining agent (multi-zone routing per spec). */
+    public synchronized Incident requestWork(int droneId, int currentZone, int agentRemaining) {
+        updateDroneState(droneId, DroneState.IDLE.name(), currentZone);
+        while (!hasAnyPending()) {
             try {
                 wait();
             } catch (InterruptedException e) {
@@ -508,7 +571,8 @@ public class Scheduler implements Runnable, SchedulerInterface {
                 return null;
             }
         }
-        Job job = queue.removeFirst();
+        Job job = pollNextJobForDrone(droneId, agentRemaining);
+        if (job == null) return null;
         inProgressByZone.put(job.incident.getZoneId(), job);
         fireStates.put(job.incident.getKey(), FireState.ASSIGNED);
         schedulerState = SchedulerState.DRONE_BUSY;
@@ -526,7 +590,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
         if (callback != null) {
             callback.onIncidentCompleted(incident);
         }
-        schedulerState = queue.isEmpty() ? SchedulerState.IDLE : SchedulerState.HAS_PENDING;
+        schedulerState = hasAnyPending() ? SchedulerState.HAS_PENDING : SchedulerState.IDLE;
         notifyAll();
     }
 

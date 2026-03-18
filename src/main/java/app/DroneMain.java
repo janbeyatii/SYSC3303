@@ -6,9 +6,9 @@ import fireincident.UDPDroneChannel;
 
 /**
  * Entry point for running a drone as its own process (Iteration 3 – Task 3 only).
- * Usage: java app.DroneMain &lt;droneId&gt; &lt;schedulerHost&gt; &lt;schedulerPort&gt; [timeScale]
+ * Usage: java app.DroneMain &lt;droneId&gt; &lt;schedulerHost&gt; &lt;schedulerPort&gt; [timeScale] [agentCapacity]
  * Example: java -cp bin app.DroneMain 1 127.0.0.1 5000
- * Example: java -cp bin app.DroneMain 1 127.0.0.1 5000 0.001
+ * Example: java -cp bin app.DroneMain 1 127.0.0.1 5000 0.001 100
  */
 public class DroneMain {
 
@@ -47,10 +47,20 @@ public class DroneMain {
             }
         }
 
-        IDroneSchedulerChannel channel = new UDPDroneChannel(host, port, droneId);
-        System.out.println("[DroneMain] Drone " + droneId + " connecting to " + host + ":" + port + " (timeScale=" + timeScale + ")");
+        int agentCapacity = 100;
+        if (args.length >= 5) {
+            try {
+                agentCapacity = Integer.parseInt(args[4].trim());
+                if (agentCapacity < 10) agentCapacity = 10;
+                if (agentCapacity > 100) agentCapacity = 100;
+            } catch (NumberFormatException ignored) {
+            }
+        }
 
-        DroneSubsystem drone = new DroneSubsystem(droneId, channel, timeScale);
+        IDroneSchedulerChannel channel = new UDPDroneChannel(host, port, droneId);
+        System.out.println("[DroneMain] Drone " + droneId + " connecting to " + host + ":" + port + " (timeScale=" + timeScale + ", capacity=" + agentCapacity + "L)");
+
+        DroneSubsystem drone = new DroneSubsystem(droneId, channel, timeScale, agentCapacity);
         Thread t = new Thread(drone, "Drone-" + droneId);
         t.setDaemon(false);
         t.start();
@@ -63,6 +73,6 @@ public class DroneMain {
     }
 
     private static void printUsage() {
-        System.err.println("Usage: java app.DroneMain <droneId> <schedulerHost> <schedulerPort> [timeScale]");
+        System.err.println("Usage: java app.DroneMain <droneId> <schedulerHost> <schedulerPort> [timeScale] [agentCapacity]");
     }
 }

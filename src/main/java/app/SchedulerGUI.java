@@ -1,11 +1,9 @@
 package app;
 
-import fireincident.FireIncidentSubsystem;
 import fireincident.Scheduler;
 import fireincident.SchedulerListener;
 import model.Incident;
-
-import fireincident.udp.Ports;
+import model.ZoneConfig;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
@@ -42,19 +40,14 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
     private final Map<Integer, Integer> droneRowById = new HashMap<>();
     /** Active or recent animations for map: drone moves from zone A to B. */
     private final Map<Integer, ZoneMapPanel.DroneAnimation> droneAnimations = new HashMap<>();
-    /** Drone processes started from GUI (channel/UDP). */
-    private final Map<Integer, Process> startedDroneProcesses = new HashMap<>();
-    private final Map<Integer, JPanel> droneChipById = new HashMap<>();
-    private int nextDroneId = 1;
-    private JPanel fleetProcessesPanel;
-    /** Time scale for newly started drone processes (1.0 = real time; 0.01 = 100× faster). */
-    private JComboBox<String> droneTimeScaleCombo;
 
     private final String defaultCsvPath;
+    private final ZoneConfig zoneConfig;
 
-    /** Same formula as DroneSubsystem: travel time in seconds = 24 + 10 * |toZone - fromZone|. UI scale: 1 real sec = 40 ms. */
-    private static long travelDurationMs(int fromZone, int toZone) {
-        double seconds = 24 + 10 * Math.abs(toZone - fromZone);
+    /** Same formula as DroneSubsystem: 24 + distance/10 seconds. UI scale: 1 real sec = 40 ms. */
+    private long travelDurationMs(int fromZone, int toZone) {
+        double distanceMeters = zoneConfig.getDistanceMeters(fromZone, toZone);
+        double seconds = 24 + distanceMeters / 10.0;
         return (long) (seconds * 40);
     }
 
@@ -64,6 +57,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
 
     public SchedulerGUI(Scheduler scheduler, String defaultCsvPath) {
         this.scheduler = scheduler;
+        this.zoneConfig = new ZoneConfig();
         this.defaultCsvPath = defaultCsvPath != null && !defaultCsvPath.isEmpty()
                 ? defaultCsvPath.trim()
                 : "data/Sample_event_file.csv";
@@ -114,7 +108,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
     }
 
     private void buildCenterPanels(){
-        zoneMapPanel = new ZoneMapPanel();
+        zoneMapPanel = new ZoneMapPanel(zoneConfig);
 
         JSplitPane tablesSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
         tablesSplit.setResizeWeight(0.65);
@@ -140,17 +134,6 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
 
         JPanel dronePanel = new JPanel(new BorderLayout());
         dronePanel.setBorder(BorderFactory.createTitledBorder("Drones"));
-        JPanel fleetToolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
-        fleetToolbar.add(new JLabel("Time scale:"));
-        droneTimeScaleCombo = new JComboBox<>(new String[]{"Real time (1×)", "10× faster", "100× faster"});
-        droneTimeScaleCombo.setToolTipText("Simulation speed for new drones. Real time = ~1–2 min per mission.");
-        fleetToolbar.add(droneTimeScaleCombo);
-        JButton startDroneBtn = new JButton("Start new drone");
-        startDroneBtn.addActionListener(e -> startNewDroneProcess());
-        fleetToolbar.add(startDroneBtn);
-        fleetProcessesPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        fleetToolbar.add(fleetProcessesPanel);
-        dronePanel.add(fleetToolbar, BorderLayout.NORTH);
         dronePanel.add(droneScroll, BorderLayout.CENTER);
 
         tablesSplit.setTopComponent(incidentPanel);
@@ -159,7 +142,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         JSplitPane centerSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
         centerSplit.setLeftComponent(zoneMapPanel);
         centerSplit.setRightComponent(tablesSplit);
-        centerSplit.setResizeWeight(0.22);
+        centerSplit.setResizeWeight(0.38);
 
         add(centerSplit, BorderLayout.CENTER);
     }
@@ -215,91 +198,6 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         add(logPanel, BorderLayout.SOUTH);
     }
 
-    private void startNewDroneProcess() {
-        final int id = nextDroneId++;
-        String host = "127.0.0.1";
-        int port = Ports.SCHEDULER;
-        String cp = System.getProperty("java.class.path", "bin");
-        File dir = new File(System.getProperty("user.dir", "."));
-        double timeScale = getSelectedDroneTimeScale();
-        try {
-            ProcessBuilder pb = new ProcessBuilder(
-                    "java", "-cp", cp,
-                    "app.DroneMain",
-                    String.valueOf(id), host, String.valueOf(port),
-                    String.valueOf(timeScale)
-            );
-            pb.directory(dir);
-            pb.redirectErrorStream(true);
-            Process p = pb.start();
-            startedDroneProcesses.put(id, p);
-            addDroneChip(id);
-            log("[GUI] Started drone process " + id + " (connects to " + host + ":" + port + ", time scale " + timeScale + ")");
-            watchDroneProcess(id, p);
-        } catch (IOException e) {
-            log("[GUI] Failed to start drone " + id + ": " + e.getMessage());
-            nextDroneId--;
-        }
-    }
-
-    private void addDroneChip(int droneId) {
-        JPanel chip = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 0));
-        chip.add(new JLabel("Drone " + droneId));
-        JButton stopBtn = new JButton("Stop");
-        stopBtn.addActionListener(e -> stopDroneProcess(droneId));
-        chip.add(stopBtn);
-        chip.setBorder(BorderFactory.createEtchedBorder());
-        droneChipById.put(droneId, chip);
-        fleetProcessesPanel.add(chip);
-        fleetProcessesPanel.revalidate();
-        fleetProcessesPanel.repaint();
-    }
-
-    private void removeDroneChip(int droneId) {
-        JPanel chip = droneChipById.remove(droneId);
-        if (chip != null) {
-            fleetProcessesPanel.remove(chip);
-            fleetProcessesPanel.revalidate();
-            fleetProcessesPanel.repaint();
-        }
-    }
-
-    private void stopDroneProcess(int droneId) {
-        Process p = startedDroneProcesses.remove(droneId);
-        if (p != null) {
-            p.destroyForcibly();
-            log("[GUI] Stopped drone process " + droneId);
-        }
-        removeDroneChip(droneId);
-    }
-
-    private double getSelectedDroneTimeScale() {
-        int i = droneTimeScaleCombo != null ? droneTimeScaleCombo.getSelectedIndex() : 2;
-        switch (i) {
-            case 0: return 1.0;
-            case 1: return 0.1;
-            default: return 0.01;
-        }
-    }
-
-    private void watchDroneProcess(int droneId, Process p) {
-        Thread t = new Thread(() -> {
-            try {
-                p.waitFor();
-            } catch (InterruptedException ignored) {
-                Thread.currentThread().interrupt();
-            }
-            SwingUtilities.invokeLater(() -> {
-                if (startedDroneProcesses.remove(droneId) != null) {
-                    removeDroneChip(droneId);
-                    log("[GUI] Drone process " + droneId + " exited");
-                }
-            });
-        }, "DroneProcess-" + droneId);
-        t.setDaemon(true);
-        t.start();
-    }
-
     private void chooseFile(){
         JFileChooser chooser = new JFileChooser(new File("."));
         chooser.setDialogTitle("Select incident CSV");
@@ -316,20 +214,45 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         loadFileBtn.setEnabled(false);
 
         String filePath = fileField.getText().trim();
-        log("[GUI] Starting simulation using: " + filePath);
-        Thread t = new Thread(() -> {
-            FireIncidentSubsystem fis = new FireIncidentSubsystem(filePath);
-            fis.processIncidents();
+        log("[GUI] Spawning Fire Incident Subsystem as separate process: " + filePath);
 
-            SwingUtilities.invokeLater(() -> {
-                setSystemStatus("DONE");
-                startBtn.setEnabled(true);
-                loadFileBtn.setEnabled(true);
-                refreshCounts();
-            });
-        }, "FireIncidentSubsystem-Thread");
-
-        t.start();
+        SimConfig config = new SimConfig();
+        String cp = System.getProperty("java.class.path", "bin");
+        File dir = new File(System.getProperty("user.dir", "."));
+        try {
+            ProcessBuilder pb = new ProcessBuilder(
+                    "java", "-cp", cp,
+                    "app.FireIncidentMain",
+                    filePath,
+                    config.getSchedulerHost(),
+                    String.valueOf(config.getSchedulerPort())
+            );
+            pb.directory(dir);
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            log("[GUI] Fire Incident Subsystem started (separate process, PID " + p.pid() + ")");
+            Thread watcher = new Thread(() -> {
+                try {
+                    p.waitFor();
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+                SwingUtilities.invokeLater(() -> {
+                    setSystemStatus("DONE");
+                    startBtn.setEnabled(true);
+                    loadFileBtn.setEnabled(true);
+                    refreshCounts();
+                    log("[GUI] Fire Incident Subsystem process finished.");
+                });
+            }, "FireIncidentProcess-Watcher");
+            watcher.setDaemon(true);
+            watcher.start();
+        } catch (IOException e) {
+            log("[GUI] Failed to start Fire Incident Subsystem: " + e.getMessage());
+            setSystemStatus("ERROR");
+            startBtn.setEnabled(true);
+            loadFileBtn.setEnabled(true);
+        }
     }
 
     private void setSystemStatus(String status){

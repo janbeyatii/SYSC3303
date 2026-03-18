@@ -66,10 +66,10 @@ public class SchedulerTest {
         idleDrones.add(1);
         idleDrones.add(2);
 
-        Method selectBestDrone = Scheduler.class.getDeclaredMethod("selectBestDrone", int.class);
-        selectBestDrone.setAccessible(true);
+        Method selectBestPushDrone = Scheduler.class.getDeclaredMethod("selectBestPushDrone", int.class);
+        selectBestPushDrone.setAccessible(true);
 
-        assertEquals(1, ((Integer) selectBestDrone.invoke(scheduler, 3)).intValue());
-        assertEquals(2, ((Integer) selectBestDrone.invoke(scheduler, 9)).intValue());
+        assertEquals(1, ((Integer) selectBestPushDrone.invoke(scheduler, 3)).intValue());
+        assertEquals(2, ((Integer) selectBestPushDrone.invoke(scheduler, 9)).intValue());
     }
 }

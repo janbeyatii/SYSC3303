@@ -1,0 +1,3 @@
+Time Zone_ID Event_type Severity
+14:03:15 3 FIRE_DETECTED High
+14:10:00 7 DRONE_REQUEST Moderate

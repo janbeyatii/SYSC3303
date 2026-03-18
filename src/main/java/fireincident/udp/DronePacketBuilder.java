@@ -11,8 +11,14 @@ public final class DronePacketBuilder {
 
     private static final String SEP = "|";
 
+    /** REQUEST_WORK|droneId or REQUEST_WORK|droneId|currentZone|agentRemaining (for multi-zone routing). */
     public static byte[] requestWork(int droneId) {
         return ("REQUEST_WORK" + SEP + droneId).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /** Request work from current position with remaining agent (spec: use remaining agent before return). */
+    public static byte[] requestWork(int droneId, int currentZone, int agentRemaining) {
+        return ("REQUEST_WORK" + SEP + droneId + SEP + currentZone + SEP + agentRemaining).getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     public static byte[] peekNext() {
