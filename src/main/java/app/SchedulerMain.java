@@ -16,7 +16,7 @@ import javax.swing.*;
  */
 public class SchedulerMain {
 
-    private static final String DEFAULT_CSV = "data/Sample_event_file.csv";
+    private static final String DEFAULT_CSV = "data/iteration4/iter4_fault_mixed.csv";
 
     public static void main(String[] args) {
         String csvPath = (args != null && args.length > 0 && args[0] != null && !args[0].isEmpty())

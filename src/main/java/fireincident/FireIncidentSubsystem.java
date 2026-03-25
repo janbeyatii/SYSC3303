@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -24,6 +25,12 @@ import java.util.Set;
 public class FireIncidentSubsystem implements Runnable {
     /** Set to true for verbose packet-level debug logging. */
     private static final boolean DEBUG_PACKETS = false;
+    private static final Set<String> ALLOWED_FAULT_TYPES = new HashSet<>(Arrays.asList(
+            "NONE", "DRONE_STUCK", "NOZZLE_JAM", "PACKET_LOSS", "CORRUPTED_MESSAGE"
+    ));
+    private static final Set<String> ALLOWED_FAULT_TARGET_TYPES = new HashSet<>(Arrays.asList(
+            "NONE", "EVENT", "DRONE"
+    ));
 
     DatagramPacket sendPacket;
     DatagramSocket sendSocket;
@@ -194,8 +201,8 @@ public class FireIncidentSubsystem implements Runnable {
     /**
      * Parses a line into an Incident object.
      * Supports both formats per spec:
-     * - Whitespace-separated: time zoneId eventType severity (e.g. "14:03:15 3 FIRE_DETECTED High")
-     * - Comma-separated (CSV): time,zoneId,eventType,severity
+     * - Whitespace-separated: time zoneId eventType severity [faultType faultTargetType faultTargetId]
+     * - Comma-separated (CSV): time,zoneId,eventType,severity[,faultType,faultTargetType,faultTargetId]
      */
     private Incident parseIncident(String line, int lineNumber) {
         if (line == null || line.trim().isEmpty()) {
@@ -203,19 +210,46 @@ public class FireIncidentSubsystem implements Runnable {
             return null;
         }
         String[] parts = line.contains(",") ? line.split(",") : line.trim().split("\\s+");
-        if (parts.length < 4) {
-            throw new IllegalArgumentException("Expected 4 fields but found " + parts.length);
+        if (parts.length != 4 && parts.length != 7) {
+            throw new IllegalArgumentException("Expected 4 or 7 fields but found " + parts.length);
         }
         try {
             String time = parts[0].trim();
             int zoneId = Integer.parseInt(parts[1].trim());
             String eventType = parts[2].trim();
             int severity = parseSeverity(parts[3].trim());
+            String faultType = Incident.NO_FAULT;
+            String faultTargetType = Incident.NO_FAULT;
+            String faultTargetId = Incident.NO_FAULT;
 
-            return new Incident(time, zoneId, eventType, severity);
+            if (parts.length == 7) {
+                faultType = normalizeFaultToken(parts[4]);
+                faultTargetType = normalizeFaultToken(parts[5]);
+                faultTargetId = normalizeFaultToken(parts[6]);
+
+                if (!ALLOWED_FAULT_TYPES.contains(faultType)) {
+                    throw new IllegalArgumentException("Invalid fault type: " + faultType);
+                }
+                if (!ALLOWED_FAULT_TARGET_TYPES.contains(faultTargetType)) {
+                    throw new IllegalArgumentException("Invalid fault target type: " + faultTargetType);
+                }
+                if ("NONE".equals(faultTargetType)) {
+                    faultTargetId = Incident.NO_FAULT;
+                }
+            }
+
+            return new Incident(time, zoneId, eventType, severity, faultType, faultTargetType, faultTargetId);
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Invalid number format in line " + lineNumber + ": " + e.getMessage());
         }
+    }
+
+    private String normalizeFaultToken(String value) {
+        if (value == null) {
+            return Incident.NO_FAULT;
+        }
+        String normalized = value.trim().toUpperCase();
+        return normalized.isEmpty() ? Incident.NO_FAULT : normalized;
     }
     /**
      * Converts severity to litres of water/foam needed (per spec: Low=10 L, Moderate=20 L, High=30 L).
