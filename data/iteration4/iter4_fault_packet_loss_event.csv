@@ -1,0 +1,3 @@
+Time,Zone ID,Event type,Severity,Fault Type,Fault Target Type,Fault Target ID
+14:07:00,6,FIRE_DETECTED,Moderate,PACKET_LOSS,EVENT,14:07:00|6|FIRE_DETECTED
+14:20:00,8,DRONE_REQUEST,Low,NONE,NONE,NONE

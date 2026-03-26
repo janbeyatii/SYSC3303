@@ -14,6 +14,7 @@ Use .bat files
 ./run.bat      # runs compiled code
 ./build_tests.bat   # compile tests
 ./run_tests.bat     # run all unit tests
+./run_distributed.bat [incidentCsvPath]  # starts Scheduler, Drones, and Fire Incident as separate UDP processes
 ```
 
 **2. Using IntelliJ IDEA:**
@@ -32,8 +33,10 @@ Run `Main.java`
 We are using the sample event CSV file provided to us from the course page. 
 
 INPUT FILE FORMAT (supports both):
-- Comma-separated (CSV): Time,Zone ID,Event type,Severity
-- Whitespace-separated (per spec): time zoneId eventType severity
+- Legacy comma-separated (CSV): Time,Zone ID,Event type,Severity
+- Legacy whitespace-separated (per spec): time zoneId eventType severity
+- Fault-aware comma-separated (CSV): Time,Zone ID,Event type,Severity,Fault Type,Fault Target Type,Fault Target ID
+- Fault-aware whitespace-separated: time zoneId eventType severity faultType faultTargetType faultTargetId
 
 Example CSV:
 Time,Zone ID,Event type,Severity
@@ -42,13 +45,25 @@ Time,Zone ID,Event type,Severity
 
 Example whitespace: 14:03:15 3 FIRE_DETECTED High
 
+Fault-aware CSV example:
+Time,Zone ID,Event type,Severity,Fault Type,Fault Target Type,Fault Target ID
+14:03:15,3,FIRE_DETECTED,High,DRONE_STUCK,EVENT,14:03:15|3|FIRE_DETECTED
+14:10:00,7,DRONE_REQUEST,Moderate,NOZZLE_JAM,DRONE,D2
+
+Fault-aware whitespace example:
+14:12:00 5 FIRE_DETECTED High PACKET_LOSS EVENT 14:12:00|5|FIRE_DETECTED
+
 Fields:
 * Time: When the incident happened (string)
 * Zone ID: Which zone (integer)
 * Event type: What happened (string, like "FIRE_DETECTED" or "DRONE_REQUEST")
 * Severity: Amount of water/foam needed (Low=10 L, Moderate=20 L, High=30 L) Use words "High", "Moderate", "Low" or litres 10, 20, 30.
+* Fault Type: Optional fault to inject. Valid values: NONE, DRONE_STUCK, NOZZLE_JAM, PACKET_LOSS, CORRUPTED_MESSAGE.
+* Fault Target Type: Optional target scope for the fault. Valid values: NONE, EVENT, DRONE.
+* Fault Target ID: Identifier of the target event or drone. Use NONE when no target is set.
 
 Severity is stored as litres: High=30, Moderate=20, Low=10
+Fault defaults for legacy 4-field input: Fault Type=NONE, Fault Target Type=NONE, Fault Target ID=NONE.
 
 ZONE COORDINATES FILE (data/zones.csv):
 Zones are rectangular shapes with coordinates in meters. Travel time and distance-based drone selection use this file.

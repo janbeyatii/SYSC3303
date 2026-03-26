@@ -52,7 +52,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
     }
 
     public SchedulerGUI(Scheduler scheduler) {
-        this(scheduler, "data/Sample_event_file.csv");
+        this(scheduler, "data/iteration4/iter4_fault_mixed.csv");
     }
 
     public SchedulerGUI(Scheduler scheduler, String defaultCsvPath) {
@@ -60,7 +60,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         this.zoneConfig = new ZoneConfig();
         this.defaultCsvPath = defaultCsvPath != null && !defaultCsvPath.isEmpty()
                 ? defaultCsvPath.trim()
-                : "data/Sample_event_file.csv";
+                : "data/iteration4/iter4_fault_mixed.csv";
 
         this.scheduler.addListener(this);
         setTitle("Firefighting Drone Swarm - Scheduler");

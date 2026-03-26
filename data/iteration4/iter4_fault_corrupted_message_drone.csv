@@ -1,0 +1,3 @@
+Time,Zone ID,Event type,Severity,Fault Type,Fault Target Type,Fault Target ID
+14:09:15,4,FIRE_DETECTED,High,CORRUPTED_MESSAGE,DRONE,D3
+14:18:30,9,DRONE_REQUEST,Moderate,NONE,NONE,NONE
