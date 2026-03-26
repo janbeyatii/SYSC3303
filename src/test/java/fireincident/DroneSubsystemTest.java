@@ -78,4 +78,77 @@ public class DroneSubsystemTest {
         drone1.join(1000);
         drone2.join(1000);
     }
+
+    @Test
+    public void testDroneStuckFaultMarksDroneUnavailableAndRequeuesIncident() throws Exception {
+        Incident incident = new Incident("14:03:15", 3, "FIRE_DETECTED", 30,
+                "DRONE_STUCK", "EVENT", "14:03:15|3|FIRE_DETECTED");
+        scheduler.receiveIncident(incident, null);
+
+        Thread drone = new Thread(new DroneSubsystem(1, scheduler, 0.001), "Drone-1");
+        drone.start();
+
+        waitForDroneState(1, DroneState.UNAVAILABLE.name(), 3000);
+
+        assertEquals(DroneState.UNAVAILABLE.name(), scheduler.getDroneState(1));
+        assertEquals(1, scheduler.getQueueSize());
+        assertEquals(0, scheduler.getInProgressCount());
+        assertEquals(Scheduler.FireState.PENDING, scheduler.getFireState(incident));
+
+        drone.join(1000);
+    }
+
+    @Test
+    public void testHardFaultShutsDownDroneAndAnotherDroneCompletesIncident() throws Exception {
+        CountDownLatch completionLatch = new CountDownLatch(1);
+        Incident incident = new Incident("14:05:30", 2, "FIRE_DETECTED", 30,
+                "NOZZLE_JAM", "DRONE", "D1");
+        scheduler.receiveIncident(incident, completed -> completionLatch.countDown());
+
+        Thread drone1 = new Thread(new DroneSubsystem(1, scheduler, 0.001), "Drone-1");
+        Thread drone2 = new Thread(new DroneSubsystem(2, scheduler, 0.001), "Drone-2");
+        drone1.start();
+        waitForDroneState(1, DroneState.OFFLINE.name(), 3000);
+        drone2.start();
+
+        assertTrue(completionLatch.await(5, TimeUnit.SECONDS));
+        waitForDroneState(2, DroneState.IDLE.name(), 3000);
+        assertEquals(DroneState.OFFLINE.name(), scheduler.getDroneState(1));
+        assertEquals(DroneState.IDLE.name(), scheduler.getDroneState(2));
+        assertEquals(Scheduler.FireState.COMPLETED, scheduler.getFireState(incident));
+
+        drone1.join(1000);
+        drone2.interrupt();
+        drone2.join(1000);
+    }
+
+    @Test
+    public void testDroneTargetedStuckFaultDuringReturnLeavesCompletedIncidentAndUnavailableDrone() throws Exception {
+        CountDownLatch completionLatch = new CountDownLatch(1);
+        Incident incident = new Incident("14:10:00", 1, "FIRE_DETECTED", 10,
+                "DRONE_STUCK", "DRONE", "D1");
+        scheduler.receiveIncident(incident, completed -> completionLatch.countDown());
+
+        Thread drone = new Thread(new DroneSubsystem(1, scheduler, 0.001), "Drone-1");
+        drone.start();
+
+        assertTrue(completionLatch.await(5, TimeUnit.SECONDS));
+        waitForDroneState(1, DroneState.UNAVAILABLE.name(), 3000);
+
+        assertEquals(Scheduler.FireState.COMPLETED, scheduler.getFireState(incident));
+        assertEquals(DroneState.UNAVAILABLE.name(), scheduler.getDroneState(1));
+
+        drone.join(1000);
+    }
+
+    private void waitForDroneState(int droneId, String expectedState, long timeoutMs) throws Exception {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            if (expectedState.equals(scheduler.getDroneState(droneId))) {
+                return;
+            }
+            Thread.sleep(25);
+        }
+        assertEquals(expectedState, scheduler.getDroneState(droneId));
+    }
 }

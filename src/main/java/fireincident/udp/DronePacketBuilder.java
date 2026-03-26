@@ -47,7 +47,9 @@ public final class DronePacketBuilder {
     /** Response to REQUEST_WORK: assign an incident to the drone. */
     public static byte[] assignIncident(Incident incident) {
         return ("ASSIGN" + SEP + incident.getTime() + SEP + incident.getZoneId()
-                + SEP + incident.getEventType() + SEP + incident.getSeverity()).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                + SEP + incident.getEventType() + SEP + incident.getSeverity()
+                + SEP + incident.getFaultType() + SEP + incident.getFaultTargetType()
+                + SEP + incident.getFaultTargetId()).getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     /** Response to REQUEST_WORK: no work available. */

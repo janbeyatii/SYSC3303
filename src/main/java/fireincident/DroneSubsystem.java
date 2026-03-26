@@ -23,6 +23,9 @@ public class DroneSubsystem implements Runnable {
     private static final double NOZZLE_CLOSE_TIME = 0.5;
     private static final double RELEASE_RATE = 190.0 / 60.0;
     private static final double MAX_BATTERY = 900;
+    private static final double FAULT_TIMEOUT_MARGIN_SECONDS = 15.0;
+    private static final double FAULT_TIMEOUT_MULTIPLIER = 1.5;
+    private static final double FAULT_TIMEOUT_OVERRUN_SECONDS = 5.0;
     private final int maxAgent;
     private int agentRemaining;
     private double batteryRemaining = MAX_BATTERY;
@@ -84,6 +87,12 @@ public class DroneSubsystem implements Runnable {
         void updateState(String state, Integer zoneId);
     }
 
+    private static class DroneFaultException extends Exception{
+        DroneFaultException(String message){
+            super(message);
+        }
+    }
+
     @Override
     public void run() {
         if (channel != null) {
@@ -107,9 +116,12 @@ public class DroneSubsystem implements Runnable {
             if (incident == null) break;
             try {
                 int zone = executeIncidentFrom(incident, reporter, 0);
-                returnToBaseAndRefill(reporter, zone);
+                returnToBaseAndRefill(reporter, zone, incident);
                 sendToScheduler(UDPMessage.droneIdle(droneId));
                 reporter.updateState(DroneState.IDLE.name(), null);
+            } catch (DroneFaultException e) {
+                System.err.println("[Drone " + droneId + "] " + e.getMessage());
+                break;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
@@ -138,15 +150,22 @@ public class DroneSubsystem implements Runnable {
                 continue;
             }
             try {
+                Incident lastIncident = incident;
                 currentZone = executeIncidentFrom(incident, reporter, currentZone);
                 while (agentRemaining > 0) {
+                    Incident preview = channel.peekNextIncident();
+                    if (preview == null || preview.getSeverity() > agentRemaining) break;
                     Incident next = channel.requestWork(droneId, currentZone, agentRemaining);
                     if (next == null) break;
+                    lastIncident = next;
                     currentZone = executeIncidentFrom(next, reporter, currentZone);
                 }
-                returnToBaseAndRefill(reporter, currentZone);
+                returnToBaseAndRefill(reporter, currentZone, lastIncident);
                 currentZone = 0;
                 reporter.updateState(DroneState.IDLE.name(), null);
+            } catch (DroneFaultException e) {
+                System.err.println("[Drone " + droneId + "] " + e.getMessage());
+                break;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
@@ -167,15 +186,22 @@ public class DroneSubsystem implements Runnable {
             Incident incident = scheduler.requestWork(droneId, currentZone, agentRemaining);
             if (incident == null) break;
             try {
+                Incident lastIncident = incident;
                 currentZone = executeIncidentFrom(incident, reporter, currentZone);
                 while (agentRemaining > 0) {
+                    Incident preview = scheduler.peekNextIncident();
+                    if (preview == null || preview.getSeverity() > agentRemaining) break;
                     Incident next = scheduler.requestWork(droneId, currentZone, agentRemaining);
                     if (next == null) break;
+                    lastIncident = next;
                     currentZone = executeIncidentFrom(next, reporter, currentZone);
                 }
-                returnToBaseAndRefill(reporter, currentZone);
+                returnToBaseAndRefill(reporter, currentZone, lastIncident);
                 currentZone = 0;
                 reporter.updateState(DroneState.IDLE.name(), null);
+            } catch (DroneFaultException e) {
+                System.err.println("[Drone " + droneId + "] " + e.getMessage());
+                break;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
@@ -184,13 +210,18 @@ public class DroneSubsystem implements Runnable {
     }
 
     /** Execute one incident from given zone. Returns the zone where drone ends (incident zone). */
-    private int executeIncidentFrom(Incident incident, IncidentReporter reporter, int fromZone) throws InterruptedException {
+    private int executeIncidentFrom(Incident incident, IncidentReporter reporter, int fromZone) throws InterruptedException, DroneFaultException{
         System.out.println("[Drone " + droneId + "] Assigned incident: " + incident);
         double travelTime = calculateTravelTime(fromZone, incident.getZoneId());
         System.out.println("[Drone " + droneId + "] Traveling to incident (from zone " + fromZone + "). Time: " + travelTime + " seconds");
         reporter.updateState(DroneState.EN_ROUTE.name(), incident.getZoneId());
-        useBattery(travelTime);
-        sleepSeconds(travelTime);
+        double actualTravelTime = hasTravelFault(incident) ? faultDurationSeconds(travelTime) : travelTime;
+        if (runTimedPhase(travelTime, actualTravelTime)) {
+            handleFault(reporter, incident.getZoneId(), "Drone " + droneId + " timed out while traveling to zone " + incident.getZoneId(), false);
+        }
+        if (hasArrivalSensorFault(incident) && runTimedPhase(1.0, faultDurationSeconds(1.0))) {
+            handleFault(reporter, incident.getZoneId(), "Arrival sensor timeout detected for zone " + incident.getZoneId(), false);
+        }
         reporter.reportArrival(incident);
         int litresNeeded = incident.getSeverity();
         int litresUsed = Math.min(litresNeeded, agentRemaining);
@@ -198,19 +229,23 @@ public class DroneSubsystem implements Runnable {
         double extinguishTime = calculateExtinguishTime(litresUsed);
         System.out.println("[Drone " + droneId + "] Extinguishing fire. Used: " + litresUsed + "L. Time: " + extinguishTime + " seconds");
         reporter.updateState(DroneState.EXTINGUISHING.name(), incident.getZoneId());
-        useBattery(extinguishTime);
-        sleepSeconds(extinguishTime);
+        double suppressionDuration = hasSuppressionHardFault(incident) ? faultDurationSeconds(extinguishTime) : extinguishTime;
+        if (runTimedPhase(extinguishTime, suppressionDuration)) {
+            handleFault(reporter, incident.getZoneId(), "Hard fault detected while suppressing at zone " + incident.getZoneId(), true);
+        }
         reporter.reportCompletion(incident);
         System.out.println("[Drone " + droneId + "] Incident completed: " + incident);
         return incident.getZoneId();
     }
 
-    private void returnToBaseAndRefill(IncidentReporter reporter, int fromZone) throws InterruptedException {
+    private void returnToBaseAndRefill(IncidentReporter reporter, int fromZone, Incident incident) throws InterruptedException, DroneFaultException{
         double returnTime = calculateTravelTime(fromZone, 0);
         reporter.updateState(DroneState.RETURNING.name(), null);
         reporter.reportReturnToBase();
-        useBattery(returnTime);
-        sleepSeconds(returnTime);
+        double actualReturnTime = hasReturnFault(incident) ? faultDurationSeconds(returnTime) : returnTime;
+        if (runTimedPhase(returnTime, actualReturnTime)) {
+            handleFault(reporter, null, "Drone " + droneId + " timed out while returning to base", false);
+        }
         agentRemaining = maxAgent;
         batteryRemaining = MAX_BATTERY;
     }
@@ -267,6 +302,58 @@ public class DroneSubsystem implements Runnable {
     }
     private double calculateExtinguishTime(int litresUsed) {
         return NOZZLE_OPEN_TIME + (litresUsed / RELEASE_RATE) + NOZZLE_CLOSE_TIME;
+    }
+    private boolean hasTravelFault(Incident incident){
+        return isEventFault(incident) && faultContains(incident, "STUCK");
+    }
+    private boolean hasArrivalSensorFault(Incident incident){
+        return matchesFaultTarget(incident) && (faultContains(incident, "ARRIVAL") || faultContains(incident, "SENSOR"));
+    }
+    private boolean hasSuppressionHardFault(Incident incident){
+        return matchesFaultTarget(incident) && (faultContains(incident, "NOZZLE") || faultContains(incident, "BAY") || faultContains(incident, "DOOR"));
+    }
+    private boolean hasReturnFault(Incident incident){
+        return isDroneFault(incident) && faultContains(incident, "STUCK");
+    }
+    private boolean isEventFault(Incident incident){
+        return matchesFaultTarget(incident) && "EVENT".equalsIgnoreCase(incident.getFaultTargetType());
+    }
+    private boolean isDroneFault(Incident incident){
+        return matchesFaultTarget(incident) && "DRONE".equalsIgnoreCase(incident.getFaultTargetType());
+    }
+    private boolean matchesFaultTarget(Incident incident){
+        if (incident == null || Incident.NO_FAULT.equalsIgnoreCase(incident.getFaultType())) {
+            return false;
+        }
+        String targetType = incident.getFaultTargetType();
+        String targetId = incident.getFaultTargetId();
+        if ("EVENT".equalsIgnoreCase(targetType)) {
+            return incident.getKey().equalsIgnoreCase(targetId);
+        }
+        if ("DRONE".equalsIgnoreCase(targetType)) {
+            return ("D" + droneId).equalsIgnoreCase(targetId) || String.valueOf(droneId).equalsIgnoreCase(targetId);
+        }
+        return false;
+    }
+    private boolean faultContains(Incident incident, String token){
+        return incident != null && incident.getFaultType() != null
+                && incident.getFaultType().toUpperCase().contains(token);
+    }
+    private boolean runTimedPhase(double expectedSeconds, double actualSeconds) throws InterruptedException{
+        useBattery(actualSeconds);
+        sleepSeconds(actualSeconds);
+        return actualSeconds > faultDeadlineSeconds(expectedSeconds);
+    }
+    private double faultDurationSeconds(double expectedSeconds){
+        return faultDeadlineSeconds(expectedSeconds) + FAULT_TIMEOUT_OVERRUN_SECONDS;
+    }
+    private double faultDeadlineSeconds(double expectedSeconds){
+        return expectedSeconds + Math.max(FAULT_TIMEOUT_MARGIN_SECONDS, expectedSeconds * FAULT_TIMEOUT_MULTIPLIER);
+    }
+    private void handleFault(IncidentReporter reporter, Integer zoneId, String message, boolean hardFault) throws DroneFaultException{
+        reporter.updateState(DroneState.FAULTED.name(), zoneId);
+        reporter.updateState(hardFault ? DroneState.OFFLINE.name() : DroneState.UNAVAILABLE.name(), zoneId);
+        throw new DroneFaultException(message);
     }
     private void useBattery(double seconds) {
         batteryRemaining = Math.max(0, batteryRemaining - seconds);

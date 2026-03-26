@@ -227,7 +227,7 @@ public class FireIncidentSubsystem implements Runnable {
                 faultTargetType = normalizeFaultToken(parts[5]);
                 faultTargetId = normalizeFaultToken(parts[6]);
 
-                if (!ALLOWED_FAULT_TYPES.contains(faultType)) {
+                if (!isAllowedFaultType(faultType)) {
                     throw new IllegalArgumentException("Invalid fault type: " + faultType);
                 }
                 if (!ALLOWED_FAULT_TARGET_TYPES.contains(faultTargetType)) {
@@ -250,6 +250,15 @@ public class FireIncidentSubsystem implements Runnable {
         }
         String normalized = value.trim().toUpperCase();
         return normalized.isEmpty() ? Incident.NO_FAULT : normalized;
+    }
+    private boolean isAllowedFaultType(String faultType){
+        if (ALLOWED_FAULT_TYPES.contains(faultType)) {
+            return true;
+        }
+        return faultType.contains("ARRIVAL")
+                || faultType.contains("SENSOR")
+                || faultType.contains("BAY")
+                || faultType.contains("DOOR");
     }
     /**
      * Converts severity to litres of water/foam needed (per spec: Low=10 L, Moderate=20 L, High=30 L).
