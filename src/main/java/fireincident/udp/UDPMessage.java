@@ -18,7 +18,10 @@ public class UDPMessage {
                 inc.getTime(),
                 String.valueOf(inc.getZoneId()),
                 inc.getEventType(),
-                String.valueOf(inc.getSeverity()));
+                String.valueOf(inc.getSeverity()),
+                inc.getFaultType(),
+                inc.getFaultTargetType(),
+                inc.getFaultTargetId());
     }
     public static UDPMessage dispatchDrone(int droneId, Incident inc) {
         return new UDPMessage(MessageType.DISPATCH_DRONE,
@@ -26,7 +29,10 @@ public class UDPMessage {
                 inc.getTime(),
                 String.valueOf(inc.getZoneId()),
                 inc.getEventType(),
-                String.valueOf(inc.getSeverity()));
+                String.valueOf(inc.getSeverity()),
+                inc.getFaultType(),
+                inc.getFaultTargetType(),
+                inc.getFaultTargetId());
     }
     public static UDPMessage droneArrived(int droneId, Incident inc) {
         return new UDPMessage(MessageType.DRONE_ARRIVED,
@@ -80,7 +86,8 @@ public class UDPMessage {
         int    zoneId    = Integer.parseInt(getField(2));
         String eventType = getField(3);
         int    severity  = Integer.parseInt(getField(4));
-        return new Incident(time, zoneId, eventType, severity);
+        return new Incident(time, zoneId, eventType, severity,
+                getField(5), getField(6), getField(7));
     }
     public MessageType getType() { return type; }
 

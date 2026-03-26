@@ -36,7 +36,10 @@ public final class DronePacketParser {
                     int zoneId = Integer.parseInt(parts[2].trim());
                     String eventType = parts[3].trim();
                     int severity = Integer.parseInt(parts[4].trim());
-                    incident = new Incident(time, zoneId, eventType, severity);
+                    String faultType = parts.length > 5 ? parts[5].trim() : Incident.NO_FAULT;
+                    String faultTargetType = parts.length > 6 ? parts[6].trim() : Incident.NO_FAULT;
+                    String faultTargetId = parts.length > 7 ? parts[7].trim() : Incident.NO_FAULT;
+                    incident = new Incident(time, zoneId, eventType, severity, faultType, faultTargetType, faultTargetId);
                 } catch (NumberFormatException ignored) {
                     // leave incident null
                 }
