@@ -265,8 +265,27 @@ public class ZoneMapPanel extends JPanel {
                 int dx = (drones.size() == 1) ? pos.x - badgeW / 2 : startX + i * (badgeW + 4);
                 int dy = pos.y - badgeH / 2;
                 String state = droneStates.get(droneId);
-                boolean enRoute = "EN_ROUTE".equals(state) || "RETURNING".equals(state);
-                g2.setColor(enRoute ? new Color(0xff9800) : new Color(0x1976d2));
+
+                // Set color based on drone state
+                Color droneColor;
+                switch (state) {
+                    case "OFFLINE":
+                        droneColor = new Color(0xB71C1C); // Red for OFFLINE
+                        break;
+                    case "UNAVAILABLE":
+                        droneColor = new Color(0xF57F17); // Yellow for UNAVAILABLE
+                        break;
+                    case "EN_ROUTE":
+                    case "RETURNING":
+                        droneColor = new Color(0xFF9800); // Orange for en route
+                        break;
+                    default:
+                        droneColor = new Color(0x1976D2); // Blue for normal states
+                        break;
+                }
+
+                // Draw drone badge
+                g2.setColor(droneColor);
                 g2.fillRoundRect(dx, dy, badgeW, badgeH, 4, 4);
                 g2.setColor(Color.WHITE);
                 g2.drawString("D" + droneId, dx + 4, dy + 12);

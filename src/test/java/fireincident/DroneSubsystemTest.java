@@ -54,6 +54,11 @@ public class DroneSubsystemTest {
             }
 
             @Override
+            public void onDroneFaultDetected(int droneId, String faultMessage) {
+
+            }
+
+            @Override
             public void onSimulationComplete() {
             }
         });

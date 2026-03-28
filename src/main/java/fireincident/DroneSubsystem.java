@@ -350,9 +350,10 @@ public class DroneSubsystem implements Runnable {
     private double faultDeadlineSeconds(double expectedSeconds){
         return expectedSeconds + Math.max(FAULT_TIMEOUT_MARGIN_SECONDS, expectedSeconds * FAULT_TIMEOUT_MULTIPLIER);
     }
-    private void handleFault(IncidentReporter reporter, Integer zoneId, String message, boolean hardFault) throws DroneFaultException{
+    public void handleFault(IncidentReporter reporter, Integer zoneId, String message, boolean hardFault) throws DroneFaultException {
         reporter.updateState(DroneState.FAULTED.name(), zoneId);
         reporter.updateState(hardFault ? DroneState.OFFLINE.name() : DroneState.UNAVAILABLE.name(), zoneId);
+        scheduler.onDroneFaultDetected(droneId, message, hardFault);
         throw new DroneFaultException(message);
     }
     private void useBattery(double seconds) {
