@@ -11,7 +11,6 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-
 import static org.junit.Assert.*;
 
 public class FireIncidentSubsystemTest {
@@ -160,6 +159,141 @@ public class FireIncidentSubsystemTest {
 
         FireIncidentSubsystem fis = new FireIncidentSubsystem(csv.getPath(), mockScheduler);
         fis.processIncidents();
+
+        assertEquals(1, receivedIncidents.size());
+        assertEquals("14:10:00", receivedIncidents.get(0).getTime());
+    }
+    @Test
+    public void processIncidents_iter4DroneStuckEventFile() throws IOException {
+        File csv = folder.newFile("iter4_fault_drone_stuck_event.csv");
+        try (FileWriter w = new FileWriter(csv)) {
+            w.write("Time,Zone ID,Event type,Severity,Fault Type,Fault Target Type,Fault Target ID\n");
+            w.write("14:03:15,3,FIRE_DETECTED,High,DRONE_STUCK,EVENT,14:03:15|3|FIRE_DETECTED\n");
+            w.write("14:10:00,7,DRONE_REQUEST,Moderate,NONE,NONE,NONE\n");
+        }
+        new FireIncidentSubsystem(csv.getPath(), mockScheduler).processIncidents();
+
+        assertEquals(2, receivedIncidents.size());
+
+        Incident faulted = receivedIncidents.get(0);
+        assertEquals("DRONE_STUCK", faulted.getFaultType());
+        assertEquals("EVENT", faulted.getFaultTargetType());
+        assertEquals(faulted.getKey(), faulted.getFaultTargetId());
+
+        Incident clean = receivedIncidents.get(1);
+        assertEquals("NONE", clean.getFaultType());
+        assertEquals("NONE", clean.getFaultTargetType());
+        assertEquals("NONE", clean.getFaultTargetId());
+    }
+
+    @Test
+    public void processIncidents_iter4NozzleJamDroneFile() throws IOException {
+        File csv = folder.newFile("iter4_fault_nozzle_jam_drone.csv");
+        try (FileWriter w = new FileWriter(csv)) {
+            w.write("Time,Zone ID,Event type,Severity,Fault Type,Fault Target Type,Fault Target ID\n");
+            w.write("14:05:30,2,FIRE_DETECTED,30,NOZZLE_JAM,DRONE,D1\n");
+            w.write("14:12:45,5,DRONE_REQUEST,20,NONE,NONE,NONE\n");
+        }
+        new FireIncidentSubsystem(csv.getPath(), mockScheduler).processIncidents();
+
+        assertEquals(2, receivedIncidents.size());
+        Incident faulted = receivedIncidents.get(0);
+        assertEquals("NOZZLE_JAM", faulted.getFaultType());
+        assertEquals("DRONE", faulted.getFaultTargetType());
+        assertEquals("D1", faulted.getFaultTargetId());
+        assertEquals(30, faulted.getSeverity());
+    }
+
+    @Test
+    public void processIncidents_iter4PacketLossEventFile() throws IOException {
+        File csv = folder.newFile("iter4_fault_packet_loss_event.csv");
+        try (FileWriter w = new FileWriter(csv)) {
+            w.write("Time,Zone ID,Event type,Severity,Fault Type,Fault Target Type,Fault Target ID\n");
+            w.write("14:07:00,6,FIRE_DETECTED,Moderate,PACKET_LOSS,EVENT,14:07:00|6|FIRE_DETECTED\n");
+            w.write("14:20:00,8,DRONE_REQUEST,Low,NONE,NONE,NONE\n");
+        }
+        new FireIncidentSubsystem(csv.getPath(), mockScheduler).processIncidents();
+
+        assertEquals(2, receivedIncidents.size());
+        assertEquals("PACKET_LOSS", receivedIncidents.get(0).getFaultType());
+        assertEquals("EVENT", receivedIncidents.get(0).getFaultTargetType());
+        assertEquals(20, receivedIncidents.get(0).getSeverity());
+        assertEquals(10, receivedIncidents.get(1).getSeverity());
+    }
+
+    @Test
+    public void processIncidents_iter4CorruptedMessageDroneFile() throws IOException {
+        File csv = folder.newFile("iter4_fault_corrupted_message_drone.csv");
+        try (FileWriter w = new FileWriter(csv)) {
+            w.write("Time,Zone ID,Event type,Severity,Fault Type,Fault Target Type,Fault Target ID\n");
+            w.write("14:09:15,4,FIRE_DETECTED,High,CORRUPTED_MESSAGE,DRONE,D3\n");
+            w.write("14:18:30,9,DRONE_REQUEST,Moderate,NONE,NONE,NONE\n");
+        }
+        new FireIncidentSubsystem(csv.getPath(), mockScheduler).processIncidents();
+
+        assertEquals(2, receivedIncidents.size());
+        assertEquals("CORRUPTED_MESSAGE", receivedIncidents.get(0).getFaultType());
+        assertEquals("DRONE", receivedIncidents.get(0).getFaultTargetType());
+        assertEquals("D3", receivedIncidents.get(0).getFaultTargetId());
+    }
+
+    @Test
+    public void processIncidents_iter4MixedFaultFile() throws IOException {
+        File csv = folder.newFile("iter4_fault_mixed.csv");
+        try (FileWriter w = new FileWriter(csv)) {
+            w.write("Time,Zone ID,Event type,Severity,Fault Type,Fault Target Type,Fault Target ID\n");
+            w.write("14:01:00,1,FIRE_DETECTED,10,NONE,NONE,NONE\n");
+            w.write("14:03:15,3,FIRE_DETECTED,High,DRONE_STUCK,EVENT,14:03:15|3|FIRE_DETECTED\n");
+            w.write("14:05:30,2,FIRE_DETECTED,30,NOZZLE_JAM,DRONE,D1\n");
+            w.write("14:07:00,6,FIRE_DETECTED,Moderate,PACKET_LOSS,EVENT,14:07:00|6|FIRE_DETECTED\n");
+            w.write("14:09:15,4,FIRE_DETECTED,High,CORRUPTED_MESSAGE,DRONE,D3\n");
+        }
+        new FireIncidentSubsystem(csv.getPath(), mockScheduler).processIncidents();
+
+        assertEquals(5, receivedIncidents.size());
+        assertEquals("NONE", receivedIncidents.get(0).getFaultType());
+        assertEquals("DRONE_STUCK", receivedIncidents.get(1).getFaultType());
+        assertEquals("NOZZLE_JAM", receivedIncidents.get(2).getFaultType());
+        assertEquals("PACKET_LOSS", receivedIncidents.get(3).getFaultType());
+        assertEquals("CORRUPTED_MESSAGE", receivedIncidents.get(4).getFaultType());
+    }
+
+    @Test
+    public void processIncidents_noneFaultTargetTypeClearsFaultTargetId() throws IOException {
+        File csv = folder.newFile("none_target.csv");
+        try (FileWriter w = new FileWriter(csv)) {
+            w.write("Time,Zone ID,Event type,Severity,Fault Type,Fault Target Type,Fault Target ID\n");
+            w.write("14:00:00,1,FIRE_DETECTED,Low,DRONE_STUCK,NONE,D1\n");
+        }
+        new FireIncidentSubsystem(csv.getPath(), mockScheduler).processIncidents();
+
+        assertEquals(1, receivedIncidents.size());
+        assertEquals("NONE", receivedIncidents.get(0).getFaultTargetId());
+    }
+
+    @Test
+    public void processIncidents_faultFieldsNormalisedToUpperCase() throws IOException {
+        File csv = folder.newFile("lowercase_fault.csv");
+        try (FileWriter w = new FileWriter(csv)) {
+            w.write("Time,Zone ID,Event type,Severity,Fault Type,Fault Target Type,Fault Target ID\n");
+            w.write("14:03:15,3,FIRE_DETECTED,High,drone_stuck,event,14:03:15|3|FIRE_DETECTED\n");
+        }
+        new FireIncidentSubsystem(csv.getPath(), mockScheduler).processIncidents();
+
+        assertEquals(1, receivedIncidents.size());
+        assertEquals("DRONE_STUCK", receivedIncidents.get(0).getFaultType());
+        assertEquals("EVENT", receivedIncidents.get(0).getFaultTargetType());
+    }
+
+    @Test
+    public void processIncidents_invalidFaultTargetTypeSkipsLine() throws IOException {
+        File csv = folder.newFile("bad_target_type.csv");
+        try (FileWriter w = new FileWriter(csv)) {
+            w.write("Time,Zone ID,Event type,Severity,Fault Type,Fault Target Type,Fault Target ID\n");
+            w.write("14:03:15,3,FIRE_DETECTED,High,DRONE_STUCK,ZONE,3\n");
+            w.write("14:10:00,7,DRONE_REQUEST,Low,NONE,NONE,NONE\n");
+        }
+        new FireIncidentSubsystem(csv.getPath(), mockScheduler).processIncidents();
 
         assertEquals(1, receivedIncidents.size());
         assertEquals("14:10:00", receivedIncidents.get(0).getTime());
