@@ -722,11 +722,11 @@ public class Scheduler implements Runnable, SchedulerInterface {
         handleFaultyDrone(droneId, isHardFault);
     }
 
-        private void notifyListenersDroneFault(int droneId, String faultMessage) {
-            for (SchedulerListener listener : listeners) {
-                listener.onDroneFaultDetected(droneId, faultMessage);
-            }
+    private void notifyListenersDroneFault(int droneId, String faultMessage) {
+        for (SchedulerListener listener : listeners) {
+            listener.onDroneFaultDetected(droneId, faultMessage);
         }
+    }
 
     private void notifyListenersDroneState(int droneId, String state) {
         for (SchedulerListener listener : listeners) {
