@@ -4,6 +4,8 @@ to the scheduler. It also receives notifications back when incidents are complet
 
 The subsystem reads through the CSV line by line (skipping the header), creates
 Incident objects for each row, and forwards them to the scheduler interface.
+The subsystem was extended to support fault injection through input files, 
+allowing simulation of fault conditions such as drone failures and communication issues.
 
 HOW TO RUN:
 
@@ -75,7 +77,15 @@ Format: Zone ID,x1,y1,x2,y2 (header row, then one zone per line)
 ## Tests
 
 - **IncidentTest** – constructor/getters, toString, severity as litres (10, 20, 30)
-- **SchedulerTest** – fire states (PENDING, ASSIGNED, COMPLETED), scheduler states (IDLE, HAS_PENDING, DRONE_BUSY), queue/in-progress counts
-- **FireIncidentSubsystemTest** – reads CSV and sends to scheduler, severity as words or numbers, skips bad lines and empty files
-- **DroneSubsystemTest** – drone states (IDLE, EN_ROUTE, EXTINGUISHING, RETURNING), partial agent use, multiple incidents in a row
-- **IntegrationTest** – full run with scheduler + drone + fire subsystem; multiple incidents finish in order and callbacks fire
+- **SchedulerTest** – fire states (PENDING, ASSIGNED, COMPLETED), scheduler states (IDLE, HAS_PENDING, DRONE_BUSY), queue/in-progress counts,fault handling (soft vs hard faults), re-queue logic, and handling of UNAVAILABLE and OFFLINE drones
+- **FireIncidentSubsystemTest** – reads CSV and sends to scheduler, severity as words or numbers, skips bad lines and empty files, parses fault-aware input (fault type, target type, target id), and handles mixed fault scenarios
+- **DroneSubsystemTest** – drone states (
+- IDLE, EN_ROUTE, EXTINGUISHING, RETURNING), partial agent use, multiple incidents in a row, fault handling including DRONE_STUCK and NOZZLE_JAM, state transitions (FAULTED, UNAVAILABLE, OFFLINE), incident re-queue and reassignment, listener notifications, and stability under packet loss and corrupted message scenarios
+- **IntegrationTest** – full run with scheduler + drone + fire subsystem; multiple incidents finish in order and callbacks fire, using UDP communication between distributed processes
+
+Test files used for Iteration 4 include:
+- iter4_fault_drone_stuck_event.csv
+- iter4_fault_nozzle_jam_drone.csv
+- iter4_fault_packet_loss_event.csv
+- iter4_fault_corrupted_message_drone.csv 
+- iter4_fault_mixed.csv
