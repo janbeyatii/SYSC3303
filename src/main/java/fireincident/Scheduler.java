@@ -717,7 +717,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
     }
 
     public synchronized void onDroneFaultDetected(int droneId, String faultMessage, boolean isHardFault) {
-        System.out.println("[Scheduler] Drone " + droneId + " fault detected: " + faultMessage);
+        fireLog("[Scheduler] Drone " + droneId + " fault detected: " + faultMessage);
         notifyListenersDroneFault(droneId, faultMessage);
         handleFaultyDrone(droneId, isHardFault);
     }
