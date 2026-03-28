@@ -1,0 +1,27 @@
+Jan - Fault Injection Infrastructure
+* Modified the input file format to support fault injection
+* Added fault fields for scenarios such as drone stuck mid-flight, nozzle jam, packet loss, and corrupted messages
+* Enabled targeting of faults to specific events or drones
+* Updated parsing logic to correctly read and apply fault data
+* Created multiple input files representing different fault scenarios
+
+Iman
+* Created test scenarios for all fault conditions (drone stuck, nozzle jam, packet loss, corrupted messages)
+* Verified communication between distributed processes during fault scenarios
+* Ensured the scheduler correctly detects faults and reassigns incidents
+* Validated that faulty drones are marked as UNAVAILABLE or OFFLINE
+* Updated project documentation and testing instructions
+
+Samy
+* Implemented drone-side fault detection using timing events
+* Detected faults such as drones stuck between zones, failed arrival sensors, and jammed nozzle/bay doors
+* Handled faults during travel, suppression, and return phases
+* Applied fault handling for UNAVAILABLE and hard fault shutdown behavior for OFFLINE
+* Ensured correct drone state transitions during fault conditions
+
+Mithushan
+* Extended the Scheduler to detect and manage drone faults
+* Reassigned fire incidents to available drones when faults occur
+* Prevented faulty or offline drones from receiving new assignments
+* Maintained accurate tracking of drone states and in-progress incidents
+* Ensured the system continues operating smoothly under fault conditions
