@@ -705,7 +705,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
 
         // Reassign jobs handled by the faulty drone
         if (job != null) {
-            System.out.println("[Scheduler] Re-queued incident after Drone " + droneId + " fault: " + job.incident);
+            fireLog("[Scheduler] Re-queued incident after Drone " + droneId + " fault: " + job.incident);
         }
 
         // Attempt to dispatch pending jobs
