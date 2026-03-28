@@ -413,7 +413,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
             fireStates.put(next.job.incident.getKey(), FireState.ASSIGNED);
             schedulerState = SchedulerState.DRONE_BUSY;
 
-            System.out.println("[Scheduler] Dispatching Drone " + droneId + " to Incident: " + next.job.incident);
+            fireLog("[Scheduler] Dispatching Drone " + droneId + " to Incident: " + next.job.incident);
             sendToPort(UDPMessage.dispatchDrone(droneId, next.job.incident), Ports.DRONE_SS);
             fireIncidentDispatched(droneId, next.job.incident);
             lastAssigned = droneId;
@@ -686,26 +686,25 @@ public class Scheduler implements Runnable, SchedulerInterface {
             sendSocket.close();
         }
     }
-    private void handleFaultyDrone(int droneId, boolean isHardFault) {
+    private synchronized void handleFaultyDrone(int droneId, boolean isHardFault) {
+        // Remove the faulty drone from idleDrones to prevent future dispatch
+        idleDrones.remove((Integer) droneId);
+
+        // Capture the job once before removing it elsewhere
+        Job job = inProgressByDrone.get(droneId);
+
         if (isHardFault) {
             System.out.println("[Scheduler] Drone " + droneId + " marked as OFFLINE due to a hard fault.");
-            // Remove the drone from active operations
-            droneStateById.put(droneId, DroneState.OFFLINE.name());
-            inProgressByDrone.remove(droneId);
-            notifyListenersDroneState(droneId, DroneState.OFFLINE.name());
+            // Update the drone state to OFFLINE
+            updateDroneState(droneId, DroneState.OFFLINE.name(), null);
         } else {
             System.out.println("[Scheduler] Drone " + droneId + " marked as UNAVAILABLE temporarily.");
-            // Mark the drone as unavailable
-            droneStateById.put(droneId, DroneState.UNAVAILABLE.name());
-            notifyListenersDroneState(droneId, DroneState.UNAVAILABLE.name());
+            // Update the drone state to UNAVAILABLE
+            updateDroneState(droneId, DroneState.UNAVAILABLE.name(), null);
         }
 
         // Reassign jobs handled by the faulty drone
-        Job job = inProgressByDrone.remove(droneId);
         if (job != null) {
-            inProgressByZone.remove(job.incident.getZoneId());
-            fireStates.put(job.incident.getKey(), FireState.PENDING);
-            requeueJob(job);
             System.out.println("[Scheduler] Re-queued incident after Drone " + droneId + " fault: " + job.incident);
         }
 
@@ -717,10 +716,17 @@ public class Scheduler implements Runnable, SchedulerInterface {
         }
     }
 
-    public void onDroneFaultDetected(int droneId, String faultMessage, boolean isHardFault) {
+    public synchronized void onDroneFaultDetected(int droneId, String faultMessage, boolean isHardFault) {
         System.out.println("[Scheduler] Drone " + droneId + " fault detected: " + faultMessage);
+        notifyListenersDroneFault(droneId, faultMessage);
         handleFaultyDrone(droneId, isHardFault);
     }
+
+        private void notifyListenersDroneFault(int droneId, String faultMessage) {
+            for (SchedulerListener listener : listeners) {
+                listener.onDroneFaultDetected(droneId, faultMessage);
+            }
+        }
 
     private void notifyListenersDroneState(int droneId, String state) {
         for (SchedulerListener listener : listeners) {

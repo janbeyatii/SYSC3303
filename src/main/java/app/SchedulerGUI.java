@@ -385,7 +385,8 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
             log("[GUI] Drone " + droneId + " fault detected: " + faultMessage);
             int row = droneRowById.getOrDefault(droneId, -1);
             if (row != -1) {
-                droneModel.setValueAt("FAULT", row, 1); // Update the drone state to "FAULT"
+                //don't change state to fault
+                // droneModel.setValueAt("FAULT", row, 1); // Update the drone state to "FAULT"
                 droneModel.setValueAt(timestamp(), row, 3); // Update the last update timestamp
             }
             refreshZoneMap();

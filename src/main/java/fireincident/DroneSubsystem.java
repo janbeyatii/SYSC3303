@@ -353,7 +353,7 @@ public class DroneSubsystem implements Runnable {
     public void handleFault(IncidentReporter reporter, Integer zoneId, String message, boolean hardFault) throws DroneFaultException {
         reporter.updateState(DroneState.FAULTED.name(), zoneId);
         reporter.updateState(hardFault ? DroneState.OFFLINE.name() : DroneState.UNAVAILABLE.name(), zoneId);
-        scheduler.onDroneFaultDetected(droneId, message, hardFault);
+        //scheduler.onDroneFaultDetected(droneId, message, hardFault);
         throw new DroneFaultException(message);
     }
     private void useBattery(double seconds) {
