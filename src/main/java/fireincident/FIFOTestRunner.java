@@ -9,6 +9,10 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 
+/**
+ * Manual / demo harness: in-process scheduler thread plus a drone, sends UDP messages to exercise
+ * FIFO behaviour. Not used by the main application entry points.
+ */
 public class FIFOTestRunner {
 
     public static void main(String[] args) throws Exception {
@@ -42,10 +46,11 @@ public class FIFOTestRunner {
             byte[] data = new byte[UDPMessage.MAX_SIZE];
             DatagramPacket packet = new DatagramPacket(data, data.length);
             listenSocket.receive(packet);
-            String received = new String(data, 0, packet.getLength()).trim();
+            String received = new String(data, 0, packet.getLength(), java.nio.charset.StandardCharsets.UTF_8).trim();
             UDPMessage msg = UDPMessage.fromString(received);
             if (msg.getType() == MessageType.INCIDENT_COMPLETED) {
-                completedKeys[completedCount] = msg.getField(0) + "|" + msg.getField(1) + "|" + msg.getField(2);                System.out.println("[TEST] Completed " + (completedCount + 1) + ": " + completedKeys[completedCount]);
+                completedKeys[completedCount] = UDPMessage.incidentCompletedKey(msg);
+                System.out.println("[TEST] Completed " + (completedCount + 1) + ": " + completedKeys[completedCount]);
                 completedCount++;
             }
         }

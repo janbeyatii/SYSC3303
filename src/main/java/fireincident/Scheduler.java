@@ -15,6 +15,15 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
+/**
+ * Central coordinator for fire incidents and drones: FIFO queueing, dispatch, completion callbacks,
+ * and Iteration 4 fault handling ({@link #onDroneFaultDetected}).
+ * <p>
+ * Two modes: <b>in-process</b> ({@code udpEnabled == false}) for unit tests with direct
+ * {@link #receiveIncident} / {@link #requestWork} calls; <b>UDP</b> ({@code true}) for distributed
+ * processes using {@link UDPMessage} on {@link Ports#SCHEDULER} plus optional binary channel protocol
+ * for pull-based drones.
+ */
 public class Scheduler implements Runnable, SchedulerInterface {
     DatagramPacket sendPacket, receivePacket;
     DatagramSocket sendSocket, receiveSocket;
@@ -51,14 +60,21 @@ public class Scheduler implements Runnable, SchedulerInterface {
     private volatile boolean fireIncidentFinished = false;
     private final ZoneConfig zoneConfig;
 
+    /** Test helper: in-process scheduler without UDP sockets. */
     public Scheduler() {
         this(false);
     }
 
+    /**
+     * @param udpEnabled if {@code true}, binds {@link Ports#SCHEDULER} and processes {@link UDPMessage} traffic
+     */
     public Scheduler(boolean udpEnabled) {
         this(udpEnabled, new ZoneConfig());
     }
 
+    /**
+     * @param zoneConfig used for distance-based drone selection when multiple drones are idle
+     */
     public Scheduler(boolean udpEnabled, ZoneConfig zoneConfig) {
         this.udpEnabled = udpEnabled;
         this.zoneConfig = zoneConfig != null ? zoneConfig : new ZoneConfig();
@@ -78,6 +94,9 @@ public class Scheduler implements Runnable, SchedulerInterface {
         }
     }
 
+    /**
+     * UDP receive loop: deserialize {@link UDPMessage}, route to handlers, or channel protocol lines.
+     */
     @Override
     public void run() {
         if (!udpEnabled || receiveSocket == null) {
@@ -169,16 +188,16 @@ public class Scheduler implements Runnable, SchedulerInterface {
 
     private void handleDroneArrived(UDPMessage msg) {
         int droneId = Integer.parseInt(msg.getField(0));
-        int zoneId = Integer.parseInt(msg.getField(2));
-        String key = incidentKeyFromFields(msg, 1);
+        String key = incidentKeyFromDroneKeyPayload(msg);
+        int zoneId = zoneIdFromIncidentKey(key);
         fireLog("[Scheduler] Drone " + droneId + " arrived at zone for " + key);
         updateDroneState(droneId, DroneState.ARRIVED.name(), zoneId);
     }
 
     private void handleDroneDroppedAgent(UDPMessage msg) throws IOException {
         int droneId = Integer.parseInt(msg.getField(0));
-        int zoneId = Integer.parseInt(msg.getField(2));
-        String key = incidentKeyFromFields(msg, 1);
+        String key = incidentKeyFromDroneKeyPayload(msg);
+        int zoneId = zoneIdFromIncidentKey(key);
         Job job = inProgressByDrone.remove(droneId);
         if (job != null) {
             inProgressByZone.remove(job.incident.getZoneId());
@@ -395,6 +414,22 @@ public class Scheduler implements Runnable, SchedulerInterface {
         return msg.getField(start) + "|" + msg.getField(start + 1) + "|" + msg.getField(start + 2);
     }
 
+    /**
+     * DRONE_ARRIVED / DRONE_DROPPED_AGENT: legacy wire had droneId|time|zone|type (4 fields);
+     * compact wire has droneId|fullKey (2 fields) when key is sent as one token (with b64 on wire).
+     */
+    private static String incidentKeyFromDroneKeyPayload(UDPMessage msg) {
+        if (msg.getFieldCount() >= 4 && !msg.getField(3).isEmpty()) {
+            return incidentKeyFromFields(msg, 1);
+        }
+        return msg.getField(1);
+    }
+
+    private static int zoneIdFromIncidentKey(String key) {
+        String[] p = key.split("\\|", 3);
+        return Integer.parseInt(p[1].trim());
+    }
+
     /** Returns the droneId that was assigned work, or null if none. Only assigns to push drones (no address). */
     private Integer dispatchPending() throws IOException {
         System.out.println("[Scheduler] Dispatching pending incidents...");
@@ -519,6 +554,14 @@ public class Scheduler implements Runnable, SchedulerInterface {
         sendSocket.send(sendPacket);
     }
 
+    /**
+     * Updates drone state and zone; if state is {@link DroneState#UNAVAILABLE} or {@link DroneState#OFFLINE},
+     * re-queues any in-progress incident for that drone.
+     *
+     * @param droneId logical drone id
+     * @param state   {@link DroneState} name
+     * @param zoneId  current zone, or {@code null} if unknown / in transit
+     */
     public synchronized void updateDroneState(int droneId, String state, Integer zoneId) {
         if (state != null) {
             droneStateById.put(droneId, state);
@@ -545,18 +588,22 @@ public class Scheduler implements Runnable, SchedulerInterface {
         fireDroneStateChanged(droneId, state, zoneId);
     }
 
+    /** @return number of pending incidents not yet assigned */
     public synchronized int getQueueSize() {
         return fifoQueue.size();
     }
 
+    /** @return number of incidents currently assigned to drones */
     public synchronized int getInProgressCount() {
         return inProgressByZone.size();
     }
 
+    /** @return lifecycle state for the given incident, or {@code null} if unknown */
     public synchronized FireState getFireState(Incident incident) {
         return fireStates.get(incident.getKey());
     }
 
+    /** @return coarse scheduler mode for tests and diagnostics */
     public synchronized SchedulerState getSchedulerState() {
         return schedulerState;
     }
@@ -582,11 +629,15 @@ public class Scheduler implements Runnable, SchedulerInterface {
         for (SchedulerListener l : listeners) l.onLog(message);
     }
 
+    /** @return next FIFO incident without removing it, or {@code null} */
     public synchronized Incident peekNextIncident() {
         Job j = fifoQueue.peekFirst();
         return j != null ? j.incident : null;
     }
 
+    /**
+     * Called when Fire subsystem has finished reading the input file.
+     */
     @Override
     public synchronized void signalNoMoreIncidents() {
         fireIncidentFinished = true;
@@ -595,6 +646,11 @@ public class Scheduler implements Runnable, SchedulerInterface {
         } catch (Exception ignored) { }
     }
 
+    /**
+     * Enqueues an incident (used by in-process tests and indirectly by UDP path).
+     *
+     * @param callback optional completion callback when the fire is fully handled
+     */
     @Override
     public synchronized void receiveIncident(Incident incident, IncidentCallback callback) {
         addToQueue(new Job(incident));
@@ -608,11 +664,15 @@ public class Scheduler implements Runnable, SchedulerInterface {
         notifyAll();
     }
 
+    /** Drone requests work assuming default zone 0 and full agent tank. */
     public synchronized Incident requestWork(int droneId) {
         return requestWork(droneId, 0, 100);
     }
 
-    /** Request work from current zone with remaining agent (multi-zone routing per spec). */
+    /**
+     * Pull-based assignment: waits until a pending incident exists, then returns one compatible
+     * with {@code agentRemaining} (in-process / channel drones).
+     */
     public synchronized Incident requestWork(int droneId, int currentZone, int agentRemaining) {
         updateDroneState(droneId, DroneState.IDLE.name(), currentZone);
         while (!hasAnyPending()) {
@@ -652,11 +712,13 @@ public class Scheduler implements Runnable, SchedulerInterface {
         notifyAll();
     }
 
+    /** In-process path: drone arrived at zone. */
     public synchronized void reportArrival(int droneId, Incident incident) {
         fireLog("[Scheduler] Drone " + droneId + " arrived at zone " + incident.getZoneId());
         updateDroneState(droneId, DroneState.ARRIVED.name(), incident.getZoneId());
     }
 
+    /** In-process path: drone heading back to base. */
     public synchronized void reportReturnToBase(int droneId) {
         fireLog("[Scheduler] Drone " + droneId + " returning to base");
         updateDroneState(droneId, DroneState.RETURNING.name(), null);
@@ -668,14 +730,17 @@ public class Scheduler implements Runnable, SchedulerInterface {
         }
     }
 
+    /** @return last known {@link DroneState} name, or {@code null} */
     public synchronized String getDroneState(int droneId) {
         return droneStateById.get(droneId);
     }
 
+    /** @return last known zone index for the drone */
     public synchronized Integer getDroneZone(int droneId) {
         return droneZoneById.get(droneId);
     }
 
+    /** Stops UDP receive loop and closes sockets. */
     public synchronized void shutdown() {
         running = false;
         notifyAll();
@@ -716,6 +781,12 @@ public class Scheduler implements Runnable, SchedulerInterface {
         }
     }
 
+    /**
+     * Iteration 4: notify scheduler of a drone fault; soft faults mark {@link DroneState#UNAVAILABLE},
+     * hard faults {@link DroneState#OFFLINE}, then re-dispatch pending work.
+     *
+     * @param isHardFault {@code true} for nozzle/bay-door style faults that retire the drone
+     */
     public synchronized void onDroneFaultDetected(int droneId, String faultMessage, boolean isHardFault) {
         fireLog("[Scheduler] Drone " + droneId + " fault detected: " + faultMessage);
         notifyListenersDroneFault(droneId, faultMessage);

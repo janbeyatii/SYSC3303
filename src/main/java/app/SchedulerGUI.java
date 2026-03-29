@@ -15,7 +15,10 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
-
+/**
+ * Swing dashboard for the scheduler: zone map, incident and drone tables, event log, and controls
+ * to load an incident file and spawn {@link app.FireIncidentMain} as a separate process.
+ */
 public class SchedulerGUI extends JFrame implements SchedulerListener {
 
     private final Scheduler scheduler;

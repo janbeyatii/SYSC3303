@@ -70,7 +70,8 @@ public class IntegrationTest {
             assertEquals(Scheduler.FireState.COMPLETED, scheduler.getFireState(incident));
             assertEquals(0, scheduler.getQueueSize());
             assertEquals(0, scheduler.getInProgressCount());
-            assertEquals(DroneState.IDLE.name(), scheduler.getDroneState(1));
+            // Completion is processed before RETURNING/IDLE UDP handling may finish; wait for final state.
+            assertTrue(waitForDroneState(1, DroneState.IDLE.name(), 3000));
         }
     }
 
@@ -84,6 +85,17 @@ public class IntegrationTest {
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < deadline) {
             if (scheduler.getFireState(incident) == Scheduler.FireState.COMPLETED) {
+                return true;
+            }
+            Thread.sleep(25);
+        }
+        return false;
+    }
+
+    private boolean waitForDroneState(int droneId, String expectedState, long timeoutMs) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            if (expectedState.equals(scheduler.getDroneState(droneId))) {
                 return true;
             }
             Thread.sleep(25);

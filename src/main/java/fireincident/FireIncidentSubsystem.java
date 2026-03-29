@@ -9,6 +9,7 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
 
+import java.nio.charset.StandardCharsets;
 
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -18,9 +19,12 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Main class for Fire Incident Subsystem.
- * Reads CSV files, creates Incident objects, and sends them to the scheduler.
- * handles callbacks when incidents are completed.
+ * Fire Incident Subsystem: reads incident rows from a file, parses {@link Incident} objects,
+ * and delivers them to the scheduler (in-process {@link SchedulerInterface} or UDP
+ * {@link UDPMessage#incidentReport} to {@link Ports#SCHEDULER}).
+ * <p>
+ * Listens on {@link Ports#FIRE_IS} for {@link MessageType#INCIDENT_COMPLETED} acknowledgements
+ * when running as a separate process.
  */
 public class FireIncidentSubsystem implements Runnable {
     /** Set to true for verbose packet-level debug logging. */
@@ -44,17 +48,25 @@ public class FireIncidentSubsystem implements Runnable {
     /** Tracks incident keys we sent, for verification when drone completes. */
     private final Set<String> pendingIncidentKeys = new HashSet<>();
 
+    /**
+     * @param csvFilePath path to incident CSV or whitespace file (header row required)
+     */
     public FireIncidentSubsystem(String csvFilePath) {
         this(csvFilePath, null);
     }
 
+    /**
+     * In-process mode for tests: incidents go to the given scheduler directly.
+     */
     public FireIncidentSubsystem(String csvFilePath, SchedulerInterface scheduler) {
         this(csvFilePath, scheduler, null, -1);
     }
 
     /**
-     * UDP-only constructor for running as a separate process (e.g. from FireIncidentMain).
-     * Sends incidents to the given scheduler host and port.
+     * UDP-only constructor for running as a separate process (e.g. from {@link app.FireIncidentMain}).
+     *
+     * @param schedulerHost scheduler bind address (e.g. {@code 127.0.0.1})
+     * @param schedulerPort   UDP port (typically {@link Ports#SCHEDULER})
      */
     public FireIncidentSubsystem(String csvFilePath, String schedulerHost, int schedulerPort) {
         this(csvFilePath, null, schedulerHost, schedulerPort);
@@ -76,6 +88,19 @@ public class FireIncidentSubsystem implements Runnable {
             throw new IllegalStateException("Failed to initialize fire incident subsystem sockets", e);
         }
     }
+
+    /** Resolves scheduler address for UDP sends (separate-process mode). */
+    private InetAddress resolveSchedulerInetAddress() throws IOException {
+        if (udpSchedulerHost != null && !udpSchedulerHost.isEmpty()) {
+            return InetAddress.getByName(udpSchedulerHost.trim());
+        }
+        return InetAddress.getLocalHost();
+    }
+
+    private int effectiveSchedulerPort() {
+        return udpSchedulerPort > 0 ? udpSchedulerPort : Ports.SCHEDULER;
+    }
+
     @Override
     public void run() {
         Thread receiver = new Thread(this::receiveLoop, "FIS-Receiver");
@@ -136,10 +161,8 @@ public class FireIncidentSubsystem implements Runnable {
         }
         try {
             byte[] msg = UDPMessage.incidentReport(incident).toBytes();
-            InetAddress destAddr = (udpSchedulerHost != null && !udpSchedulerHost.isEmpty())
-                    ? InetAddress.getByName(udpSchedulerHost)
-                    : InetAddress.getLocalHost();
-            int destPort = udpSchedulerPort > 0 ? udpSchedulerPort : Ports.SCHEDULER;
+            InetAddress destAddr = resolveSchedulerInetAddress();
+            int destPort = effectiveSchedulerPort();
             sendPacket = new DatagramPacket(msg, msg.length, destAddr, destPort);
             if (DEBUG_PACKETS) {
                 System.out.println("[FireIncidentSubsystem] Sending to " + destAddr + ":" + destPort + ": " + new String(msg));
@@ -153,10 +176,8 @@ public class FireIncidentSubsystem implements Runnable {
     private void sendNoMoreIncidents() {
         if (sendSocket == null) return;
         try {
-            InetAddress destAddr = (udpSchedulerHost != null && !udpSchedulerHost.isEmpty())
-                    ? InetAddress.getByName(udpSchedulerHost)
-                    : InetAddress.getLocalHost();
-            int destPort = udpSchedulerPort > 0 ? udpSchedulerPort : Ports.SCHEDULER;
+            InetAddress destAddr = resolveSchedulerInetAddress();
+            int destPort = effectiveSchedulerPort();
             byte[] msg = UDPMessage.noMoreIncidents().toBytes();
             sendPacket = new DatagramPacket(msg, msg.length, destAddr, destPort);
             sendSocket.send(sendPacket);
@@ -173,15 +194,14 @@ public class FireIncidentSubsystem implements Runnable {
                 receivePacket = new DatagramPacket(data, data.length);
                 receiveSocket.receive(receivePacket);
                 int len = receivePacket.getLength();
-                String received = new String(data, 0, len);
+                String received = new String(data, 0, len, StandardCharsets.UTF_8);
                 if (DEBUG_PACKETS) {
                     System.out.println("[FireIncidentSubsystem] Received from " + receivePacket.getAddress() + ":" + receivePacket.getPort() + ": " + received.trim());
                 }
                 UDPMessage msg = UDPMessage.fromString(received.trim());
 
                 if (msg.getType() == MessageType.INCIDENT_COMPLETED) {
-                    // Key is time|zoneId|eventType; wire format splits by | so reconstruct from fields 0,1,2
-                    String incidentKey = msg.getField(0) + "|" + msg.getField(1) + "|" + msg.getField(2);
+                    String incidentKey = UDPMessage.incidentCompletedKey(msg);
                     if (pendingIncidentKeys.remove(incidentKey)) {
                         System.out.println("[FireIncidentSubsystem] CONFIRMED: Fire zone received assistance - drone arrived and used agent for: " + incidentKey);
                     } else {

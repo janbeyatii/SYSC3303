@@ -23,6 +23,9 @@ public class SimConfig {
         this(DEFAULT_CONFIG_PATH);
     }
 
+    /**
+     * @param configPath path to properties file or filename relative to the working directory
+     */
     public SimConfig(String configPath) {
         Properties props = new Properties();
         Path path = Paths.get(configPath);

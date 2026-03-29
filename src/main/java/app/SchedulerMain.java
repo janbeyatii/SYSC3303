@@ -13,6 +13,8 @@ import javax.swing.*;
  * Usage: java app.SchedulerMain [defaultCsvPath]
  * <p>
  * Then run FireIncidentMain in another process to send incidents, or use the GUI Start button.
+ *
+ * @param args optional default incident CSV path for the GUI text field
  */
 public class SchedulerMain {
 

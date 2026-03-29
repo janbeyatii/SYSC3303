@@ -1,15 +1,23 @@
 package fireincident;
+
 import model.Incident;
 import model.ZoneConfig;
 import fireincident.udp.MessageType;
 import fireincident.udp.Ports;
 import fireincident.udp.UDPMessage;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 
-
+/**
+ * Simulates one drone: travel, suppression (agent use), return to base, and battery timing.
+ * <p>
+ * Modes: <b>in-process</b> with a {@link Scheduler} reference; <b>UDP push</b> with datagrams to
+ * the scheduler; <b>UDP pull</b> via {@link IDroneSchedulerChannel} (standalone {@link app.DroneMain}).
+ * Iteration 4 adds fault injection when {@link Incident} metadata matches this drone or event key.
+ */
 public class DroneSubsystem implements Runnable {
     /** Set to true for verbose packet-level debug logging. */
     private static final boolean DEBUG_PACKETS = false;
@@ -256,7 +264,7 @@ public class DroneSubsystem implements Runnable {
                 receivePacket = new DatagramPacket(data, data.length);
                 receiveSocket.receive(receivePacket);
                 int len = receivePacket.getLength();
-                String received = new String(data, 0, len);
+                String received = new String(data, 0, len, StandardCharsets.UTF_8);
                 if (DEBUG_PACKETS) {
                     System.out.println("[Drone " + droneId + "] Received from " + receivePacket.getAddress() + ":" + receivePacket.getPort() + ": " + received.trim());
                 }

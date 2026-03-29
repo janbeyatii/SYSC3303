@@ -5,13 +5,17 @@ import fireincident.IDroneSchedulerChannel;
 import fireincident.UDPDroneChannel;
 
 /**
- * Entry point for running a drone as its own process (Iteration 3 – Task 3 only).
- * Usage: java app.DroneMain &lt;droneId&gt; &lt;schedulerHost&gt; &lt;schedulerPort&gt; [timeScale] [agentCapacity]
- * Example: java -cp bin app.DroneMain 1 127.0.0.1 5000
- * Example: java -cp bin app.DroneMain 1 127.0.0.1 5000 0.001 100
+ * Entry point for one drone as its own OS process (UDP to scheduler).
+ * <p>
+ * Usage: {@code java -cp &lt;classpath&gt; app.DroneMain <droneId> <schedulerHost> <schedulerPort> [timeScale] [agentCapacity]}
+ *
+ * @see fireincident.DroneSubsystem
  */
 public class DroneMain {
 
+    /**
+     * @param args droneId, scheduler host, scheduler port, optional time scale and agent capacity (litres)
+     */
     public static void main(String[] args) {
         if (args == null || args.length < 3) {
             printUsage();

@@ -20,19 +20,17 @@ Use .bat files
 ```
 
 **2. Using IntelliJ IDEA:**
-Run `Main.java`
+Run `Main.java` (all-in-one) or run `SchedulerMain`, `DroneMain`, and `FireIncidentMain`
 
-**3. Three separate processes (per Iteration 3 spec):**
-- **Process 1 – Scheduler**: Run `Main` or `SchedulerMain` (spawns drones from config, shows GUI)
-- **Process 2 – Fire Incident**: When you click Start, the GUI spawns `FireIncidentMain` as a separate process
-- **Process 3..N – Drones**: Spawned at startup by Main/SchedulerMain from config
+**3. Process layout:**
+- `run_distributed.bat` — starts **SchedulerMain**, **N × DroneMain**, and **FireIncidentMain** as separate OS processes.
 
 **4. Config (data/config.properties):**
 - numDrones: Number of drones at startup (default: 10)
 - droneTimeScale: Simulation speed (0.01 = 100× faster)
 - schedulerHost, schedulerPort: Where Fire Incident and drones connect
 
-We are using the sample event CSV file provided to us from the course page. 
+Sample inputs: `data/Sample_event_file.csv` (legacy 4-field). Default path for `Main` / `SchedulerMain` / GUI is `data/iteration4/iter4_fault_mixed.csv` unless you pass a different path as the first argument.
 
 INPUT FILE FORMAT (supports both):
 - Legacy comma-separated (CSV): Time,Zone ID,Event type,Severity
@@ -74,18 +72,6 @@ Format: Zone ID,x1,y1,x2,y2 (header row, then one zone per line)
 * Zones 1-9 = Fire zones in a 3×3 grid
 * Distance between zones = Euclidean distance between rectangle centers
 
-## Tests
+## Documentation
 
-- **IncidentTest** – constructor/getters, toString, severity as litres (10, 20, 30)
-- **SchedulerTest** – fire states (PENDING, ASSIGNED, COMPLETED), scheduler states (IDLE, HAS_PENDING, DRONE_BUSY), queue/in-progress counts,fault handling (soft vs hard faults), re-queue logic, and handling of UNAVAILABLE and OFFLINE drones
-- **FireIncidentSubsystemTest** – reads CSV and sends to scheduler, severity as words or numbers, skips bad lines and empty files, parses fault-aware input (fault type, target type, target id), and handles mixed fault scenarios
-- **DroneSubsystemTest** – drone states (
-- IDLE, EN_ROUTE, EXTINGUISHING, RETURNING), partial agent use, multiple incidents in a row, fault handling including DRONE_STUCK and NOZZLE_JAM, state transitions (FAULTED, UNAVAILABLE, OFFLINE), incident re-queue and reassignment, listener notifications, and stability under packet loss and corrupted message scenarios
-- **IntegrationTest** – full run with scheduler + drone + fire subsystem; multiple incidents finish in order and callbacks fire, using UDP communication between distributed processes
-
-Test files used for Iteration 4 include:
-- iter4_fault_drone_stuck_event.csv
-- iter4_fault_nozzle_jam_drone.csv
-- iter4_fault_packet_loss_event.csv
-- iter4_fault_corrupted_message_drone.csv 
-- iter4_fault_mixed.csv
+- **[Iteration 4 architecture and UDP flow](docs/iteration4.md)** — subsystems, message flow, fault handling overview, and testing pointer.
