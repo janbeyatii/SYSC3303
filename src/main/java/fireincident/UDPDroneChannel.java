@@ -2,6 +2,7 @@ package fireincident;
 
 import fireincident.udp.DronePacketBuilder;
 import fireincident.udp.DronePacketParser;
+import model.DroneTelemetry;
 import model.Incident;
 
 import java.net.DatagramPacket;
@@ -94,6 +95,11 @@ public class UDPDroneChannel implements IDroneSchedulerChannel {
     @Override
     public void updateDroneState(int droneId, String state, Integer zoneId) {
         sendReport(DronePacketBuilder.reportState(droneId, state, zoneId));
+    }
+
+    @Override
+    public void updateDroneTelemetry(DroneTelemetry t) {
+        sendReport(DronePacketBuilder.reportStateTelemetry(t));
     }
 
     private void sendReport(byte[] req) {

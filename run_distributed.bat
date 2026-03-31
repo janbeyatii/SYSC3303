@@ -29,17 +29,23 @@ if exist "%CONFIG_FILE%" (
   )
 )
 
-echo [run_distributed] Building classes...
-call mvn -q -DskipTests compile
+echo [run_distributed] Building classes and dependency classpath...
+call mvn -q -DskipTests compile dependency:build-classpath "-Dmdep.outputFile=target/maven-classpath.txt" "-DincludeScope=compile"
 if errorlevel 1 (
   echo [run_distributed] Build failed. Aborting.
   exit /b 1
 )
 
+REM SchedulerMain needs FlatLaf and other deps on the classpath, not only target/classes.
 set "CP=target/classes"
 if exist "target/test-classes" set "CP=target/classes;target/test-classes"
+if exist "target\maven-classpath.txt" (
+  for /f "usebackq delims=" %%a in ("target\maven-classpath.txt") do set "DEP_CP=%%a"
+  set "CP=!CP!;!DEP_CP!"
+)
 
-echo [run_distributed] Starting Scheduler process...
+echo [run_distributed] Starting Scheduler + GUI (SKIP_DRONE_LAUNCHER: drones started below)...
+set "SKIP_DRONE_LAUNCHER=1"
 start "SchedulerMain" cmd /k java -cp "%CP%" app.SchedulerMain "%INCIDENT_CSV%"
 
 REM Small delay so scheduler socket is ready before drones connect.

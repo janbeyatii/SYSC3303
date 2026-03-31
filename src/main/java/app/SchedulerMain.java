@@ -1,5 +1,6 @@
 package app;
 
+import com.formdev.flatlaf.FlatLightLaf;
 import fireincident.Scheduler;
 import fireincident.udp.Ports;
 
@@ -33,13 +34,35 @@ public class SchedulerMain {
         schedulerThread.start();
 
         System.out.println("[SchedulerMain] Scheduler running on port " + Ports.SCHEDULER);
-        System.out.println("[SchedulerMain] Spawning " + config.getNumDrones() + " drone processes from config...");
-        DroneLauncher.spawnDrones(config);
-        System.out.println("[SchedulerMain] Start FireIncidentMain in another process, or use GUI Start button.");
+        if (skipDroneLauncherFromEnv()) {
+            System.out.println("[SchedulerMain] SKIP_DRONE_LAUNCHER is set — not spawning drones (use run_distributed.bat or start DroneMain yourself).");
+        } else {
+            System.out.println("[SchedulerMain] Spawning " + config.getNumDrones() + " drone processes from config...");
+            DroneLauncher.spawnDrones(config);
+        }
+        System.out.println("[SchedulerMain] Run FireIncidentMain separately, or use the GUI \"Restart simulation\" button.");
 
         SwingUtilities.invokeLater(() -> {
-            SchedulerGUI gui = new SchedulerGUI(scheduler, csvPath);
+            try {
+                FlatLightLaf.setup();
+                UIManager.put("Component.focusWidth", 0);
+                UIManager.put("Button.arc", 8);
+                UIManager.put("Component.arc", 8);
+                UIManager.put("TextComponent.arc", 6);
+            } catch (Exception e) {
+                System.err.println("[SchedulerMain] FlatLaf not applied: " + e.getMessage());
+            }
+            SchedulerGUI gui = new SchedulerGUI(scheduler, csvPath, config);
             gui.setVisible(true);
         });
+    }
+
+    /**
+     * When {@code SKIP_DRONE_LAUNCHER=1} (e.g. {@code run_distributed.bat} already started {@link app.DroneMain} processes),
+     * do not spawn a second set of drones from this JVM.
+     */
+    private static boolean skipDroneLauncherFromEnv() {
+        String v = System.getenv("SKIP_DRONE_LAUNCHER");
+        return v != null && ("1".equals(v.trim()) || "true".equalsIgnoreCase(v.trim()));
     }
 }

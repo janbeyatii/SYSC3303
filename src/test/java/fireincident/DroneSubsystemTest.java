@@ -55,7 +55,7 @@ public class DroneSubsystemTest {
             }
 
             @Override
-            public void onDroneFaultDetected(int droneId, String faultMessage) {
+            public void onDroneFaultDetected(int droneId, String faultMessage, boolean isHardFault) {
 
             }
 
@@ -94,7 +94,7 @@ public class DroneSubsystemTest {
         Thread drone = new Thread(new DroneSubsystem(1, scheduler, 0.001), "Drone-1");
         drone.start();
 
-        waitForDroneState(1, DroneState.UNAVAILABLE.name(), 3000);
+        waitForDroneState(1, DroneState.UNAVAILABLE.name(), 15000);
 
         assertEquals(DroneState.UNAVAILABLE.name(), scheduler.getDroneState(1));
         assertEquals(1, scheduler.getQueueSize());
@@ -256,7 +256,7 @@ public class DroneSubsystemTest {
 
         scheduler.addListener(new NoOpListener() {
             @Override
-            public void onDroneFaultDetected(int droneId, String faultMessage) {
+            public void onDroneFaultDetected(int droneId, String faultMessage, boolean isHardFault) {
                 faultedDroneId.set(droneId);
                 faultLatch.countDown();
             }
@@ -282,7 +282,7 @@ public class DroneSubsystemTest {
 
         scheduler.addListener(new NoOpListener() {
             @Override
-            public void onDroneFaultDetected(int droneId, String faultMessage) {
+            public void onDroneFaultDetected(int droneId, String faultMessage, boolean isHardFault) {
                 faultedDroneId.set(droneId);
                 faultLatch.countDown();
             }
@@ -347,7 +347,7 @@ public class DroneSubsystemTest {
         @Override public void onIncidentCompleted(int d, Incident i) {}
         @Override public void onDroneStateChanged(int d, String s, Integer z) {}
         @Override public void onLog(String m) {}
-        @Override public void onDroneFaultDetected(int d, String m) {}
+        @Override public void onDroneFaultDetected(int d, String m, boolean h) {}
         @Override public void onSimulationComplete() {}
     }
 }

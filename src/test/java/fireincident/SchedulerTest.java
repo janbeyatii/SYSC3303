@@ -159,7 +159,7 @@ public class SchedulerTest {
 
         scheduler.addListener(new NoOpListener() {
             @Override
-            public void onDroneFaultDetected(int droneId, String faultMessage) {
+            public void onDroneFaultDetected(int droneId, String faultMessage, boolean isHardFault) {
                 notifiedId.set(droneId);
                 notifiedMsg.set(faultMessage);
                 latch.countDown();
@@ -178,7 +178,7 @@ public class SchedulerTest {
 
         scheduler.addListener(new NoOpListener() {
             @Override
-            public void onDroneFaultDetected(int droneId, String faultMessage) {
+            public void onDroneFaultDetected(int droneId, String faultMessage, boolean isHardFault) {
                 latch.countDown();
             }
         });
@@ -237,7 +237,7 @@ public class SchedulerTest {
         @Override public void onIncidentCompleted(int d, Incident i) {}
         @Override public void onDroneStateChanged(int d, String s, Integer z) {}
         @Override public void onLog(String m) {}
-        @Override public void onDroneFaultDetected(int d, String m) {}
+        @Override public void onDroneFaultDetected(int d, String m, boolean h) {}
         @Override public void onSimulationComplete() {}
     }
 }

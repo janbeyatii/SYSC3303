@@ -1,5 +1,6 @@
 package fireincident;
 
+import model.DroneTelemetry;
 import model.Incident;
 import model.ZoneConfig;
 import fireincident.udp.MessageType;
@@ -93,6 +94,7 @@ public class DroneSubsystem implements Runnable {
         void reportCompletion(Incident incident);
         void reportReturnToBase();
         void updateState(String state, Integer zoneId);
+        void updateTelemetry(DroneTelemetry t);
     }
 
     private static class DroneFaultException extends Exception{
@@ -116,6 +118,7 @@ public class DroneSubsystem implements Runnable {
             @Override public void reportCompletion(Incident incident) { sendToScheduler(UDPMessage.droneDroppedAgent(droneId, incident)); }
             @Override public void reportReturnToBase() { sendToScheduler(UDPMessage.droneReturning(droneId)); }
             @Override public void updateState(String state, Integer zoneId) { DroneSubsystem.this.updateDroneState(state, zoneId); }
+            @Override public void updateTelemetry(DroneTelemetry t) { sendToScheduler(UDPMessage.droneStateTelemetry(t)); }
         };
         sendToScheduler(UDPMessage.droneIdle(droneId));
         reporter.updateState(DroneState.IDLE.name(), null);
@@ -143,6 +146,7 @@ public class DroneSubsystem implements Runnable {
             @Override public void reportCompletion(Incident incident) { channel.reportCompletion(droneId, incident); }
             @Override public void reportReturnToBase() { channel.reportReturnToBase(droneId); }
             @Override public void updateState(String state, Integer zoneId) { channel.updateDroneState(droneId, state, zoneId); }
+            @Override public void updateTelemetry(DroneTelemetry t) { channel.updateDroneTelemetry(t); }
         };
         reporter.updateState(DroneState.IDLE.name(), null);
         int currentZone = 0;
@@ -187,6 +191,7 @@ public class DroneSubsystem implements Runnable {
             @Override public void reportCompletion(Incident incident) { scheduler.reportCompletion(droneId, incident); }
             @Override public void reportReturnToBase() { scheduler.reportReturnToBase(droneId); }
             @Override public void updateState(String state, Integer zoneId) { updateInProcessDroneState(state, zoneId); }
+            @Override public void updateTelemetry(DroneTelemetry t) { scheduler.applyDroneTelemetry(t); }
         };
         reporter.updateState(DroneState.IDLE.name(), null);
         int currentZone = 0;
@@ -224,7 +229,7 @@ public class DroneSubsystem implements Runnable {
         System.out.println("[Drone " + droneId + "] Traveling to incident (from zone " + fromZone + "). Time: " + travelTime + " seconds");
         reporter.updateState(DroneState.EN_ROUTE.name(), incident.getZoneId());
         double actualTravelTime = hasTravelFault(incident) ? faultDurationSeconds(travelTime) : travelTime;
-        if (runTimedPhase(travelTime, actualTravelTime)) {
+        if (runTravelPhaseWithTelemetry(reporter, incident, fromZone, travelTime, actualTravelTime)) {
             handleFault(reporter, incident.getZoneId(), "Drone " + droneId + " timed out while traveling to zone " + incident.getZoneId(), false);
         }
         if (hasArrivalSensorFault(incident) && runTimedPhase(1.0, faultDurationSeconds(1.0))) {
@@ -251,11 +256,12 @@ public class DroneSubsystem implements Runnable {
         reporter.updateState(DroneState.RETURNING.name(), null);
         reporter.reportReturnToBase();
         double actualReturnTime = hasReturnFault(incident) ? faultDurationSeconds(returnTime) : returnTime;
-        if (runTimedPhase(returnTime, actualReturnTime)) {
+        if (runReturnPhaseWithTelemetry(reporter, fromZone, returnTime, actualReturnTime)) {
             handleFault(reporter, null, "Drone " + droneId + " timed out while returning to base", false);
         }
         agentRemaining = maxAgent;
         batteryRemaining = MAX_BATTERY;
+        reporter.updateTelemetry(snap(DroneState.IDLE.name(), 0, null, null));
     }
     private Incident waitForDispatch() {
         while (!Thread.currentThread().isInterrupted()) {
@@ -311,6 +317,59 @@ public class DroneSubsystem implements Runnable {
     private double calculateExtinguishTime(int litresUsed) {
         return NOZZLE_OPEN_TIME + (litresUsed / RELEASE_RATE) + NOZZLE_CLOSE_TIME;
     }
+
+    private DroneTelemetry snap(String state, Integer zoneId, Integer destZone, Double distM) {
+        return new DroneTelemetry(droneId, state, zoneId, agentRemaining, maxAgent,
+                batteryRemaining, MAX_BATTERY, destZone, distM);
+    }
+
+    private boolean runTravelPhaseWithTelemetry(IncidentReporter reporter, Incident incident, int fromZone,
+            double expectedTravelSeconds, double actualTravelSeconds) throws InterruptedException {
+        double totalDist = zoneConfig.getDistanceMeters(fromZone, incident.getZoneId());
+        int dest = incident.getZoneId();
+        if (actualTravelSeconds <= 1e-9) {
+            reporter.updateTelemetry(snap(DroneState.EN_ROUTE.name(), dest, dest, 0.0));
+            sleepSeconds(0);
+            return false;
+        }
+        double elapsed = 0;
+        double step = Math.max(0.25, Math.min(5.0, actualTravelSeconds / 40.0));
+        while (true) {
+            double distRem = totalDist * (1.0 - elapsed / actualTravelSeconds);
+            if (distRem < 0) distRem = 0;
+            reporter.updateTelemetry(snap(DroneState.EN_ROUTE.name(), dest, dest, distRem));
+            if (elapsed >= actualTravelSeconds - 1e-9) break;
+            double next = Math.min(step, actualTravelSeconds - elapsed);
+            useBattery(next);
+            sleepSeconds(next);
+            elapsed += next;
+        }
+        return actualTravelSeconds > faultDeadlineSeconds(expectedTravelSeconds);
+    }
+
+    private boolean runReturnPhaseWithTelemetry(IncidentReporter reporter, int fromZone,
+            double expectedReturnSeconds, double actualReturnSeconds) throws InterruptedException {
+        double totalDist = zoneConfig.getDistanceMeters(fromZone, 0);
+        if (actualReturnSeconds <= 1e-9) {
+            reporter.updateTelemetry(snap(DroneState.RETURNING.name(), fromZone, 0, 0.0));
+            sleepSeconds(0);
+            return false;
+        }
+        double elapsed = 0;
+        double step = Math.max(0.25, Math.min(5.0, actualReturnSeconds / 40.0));
+        while (true) {
+            double distRem = totalDist * (1.0 - elapsed / actualReturnSeconds);
+            if (distRem < 0) distRem = 0;
+            reporter.updateTelemetry(snap(DroneState.RETURNING.name(), fromZone, 0, distRem));
+            if (elapsed >= actualReturnSeconds - 1e-9) break;
+            double next = Math.min(step, actualReturnSeconds - elapsed);
+            useBattery(next);
+            sleepSeconds(next);
+            elapsed += next;
+        }
+        return actualReturnSeconds > faultDeadlineSeconds(expectedReturnSeconds);
+    }
+
     private boolean hasTravelFault(Incident incident){
         return isEventFault(incident) && faultContains(incident, "STUCK");
     }
