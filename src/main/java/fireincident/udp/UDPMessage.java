@@ -1,5 +1,6 @@
 package fireincident.udp;
 
+import model.DroneTelemetry;
 import model.Incident;
 
 import java.nio.charset.StandardCharsets;
@@ -92,6 +93,23 @@ public class UDPMessage {
                 String.valueOf(droneId),
                 state,
                 zoneId == null ? "" : String.valueOf(zoneId));
+    }
+
+    /** Push-drone telemetry: agent (L), battery (s), destination zone, distance remaining (m). */
+    public static UDPMessage droneStateTelemetry(DroneTelemetry t) {
+        String z = t.zoneId() == null ? "" : String.valueOf(t.zoneId());
+        String dz = t.destinationZoneId() == null ? "" : String.valueOf(t.destinationZoneId());
+        String dist = t.distanceToDestinationMeters() == null ? "" : String.valueOf(t.distanceToDestinationMeters());
+        return new UDPMessage(MessageType.DRONE_STATE,
+                String.valueOf(t.droneId()),
+                t.state(),
+                z,
+                String.valueOf(t.agentRemainingLitres()),
+                String.valueOf(t.agentCapacityLitres()),
+                String.valueOf(t.batteryRemainingSeconds()),
+                String.valueOf(t.batteryMaxSeconds()),
+                dz,
+                dist);
     }
 
     /** Scheduler notifies Fire subsystem that an incident is fully handled. */

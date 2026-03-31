@@ -1,5 +1,6 @@
 package fireincident;
 
+import model.DroneTelemetry;
 import model.Incident;
 import model.ZoneConfig;
 import fireincident.udp.MessageType;
@@ -51,6 +52,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
     private final List<SchedulerListener> listeners = new ArrayList<>();
     private final Map<Integer, String> droneStateById = new HashMap<>();
     private final Map<Integer, Integer> droneZoneById = new HashMap<>();
+    private final Map<Integer, DroneTelemetry> droneTelemetryById = new HashMap<>();
     private final LinkedList<Integer> idleDrones = new LinkedList<>();
     /** For channel protocol: where to send ASSIGN to each drone (enables multiple drone processes). */
     private final Map<Integer, InetSocketAddress> droneAddresses = new HashMap<>();
@@ -232,6 +234,11 @@ public class Scheduler implements Runnable, SchedulerInterface {
     }
 
     private void handleDroneState(UDPMessage msg) {
+        if (msg.getFieldCount() >= 9) {
+            DroneTelemetry dt = parseDroneTelemetryFromUdp(msg);
+            applyTelemetryAndMaybeUpdateState(dt);
+            return;
+        }
         int droneId = Integer.parseInt(msg.getField(0));
         String state = msg.getField(1);
         String zoneStr = msg.getField(2);
@@ -350,6 +357,17 @@ public class Scheduler implements Runnable, SchedulerInterface {
         if (parts.length < 3) return;
         int droneId = Integer.parseInt(parts[1].trim());
         recordDroneAddress(droneId, fromAddr, fromPort);
+        if (parts.length >= 10) {
+            DroneTelemetry dt = parseDroneTelemetryFromChannel(parts);
+            applyTelemetryAndMaybeUpdateState(dt);
+            if (DroneState.IDLE.name().equals(dt.state()) && !idleDrones.contains(droneId)) {
+                idleDrones.add(droneId);
+            }
+            dispatchPending();
+            checkShutdown();
+            sendToAddress(DronePacketBuilder.ack(), fromAddr, fromPort);
+            return;
+        }
         String state = parts[2].trim();
         String zoneStr = parts.length > 3 ? parts[3].trim() : "";
         Integer zoneId = zoneStr.isEmpty() ? null : Integer.parseInt(zoneStr);
@@ -555,6 +573,62 @@ public class Scheduler implements Runnable, SchedulerInterface {
     }
 
     /**
+     * In-process path: full drone snapshot from {@link DroneSubsystem} (no UDP).
+     */
+    public synchronized void applyDroneTelemetry(DroneTelemetry t) {
+        applyTelemetryAndMaybeUpdateState(t);
+    }
+
+    private void applyTelemetryAndMaybeUpdateState(DroneTelemetry dt) {
+        droneTelemetryById.put(dt.droneId(), dt);
+        fireDroneTelemetryUpdated(dt);
+        String prev = droneStateById.get(dt.droneId());
+        if (prev == null || !prev.equals(dt.state())) {
+            updateDroneState(dt.droneId(), dt.state(), dt.zoneId());
+        } else if (dt.zoneId() != null) {
+            droneZoneById.put(dt.droneId(), dt.zoneId());
+        }
+    }
+
+    private DroneTelemetry parseDroneTelemetryFromUdp(UDPMessage msg) {
+        int droneId = Integer.parseInt(msg.getField(0));
+        String state = msg.getField(1);
+        String zoneStr = msg.getField(2);
+        Integer zoneId = zoneStr.isEmpty() ? null : Integer.parseInt(zoneStr);
+        int agentRem = Integer.parseInt(msg.getField(3));
+        int agentMax = Integer.parseInt(msg.getField(4));
+        double batRem = Double.parseDouble(msg.getField(5));
+        double batMax = Double.parseDouble(msg.getField(6));
+        String dzStr = msg.getField(7);
+        Integer dest = dzStr.isEmpty() ? null : Integer.parseInt(dzStr);
+        String distStr = msg.getField(8);
+        Double dist = distStr.isEmpty() ? null : Double.parseDouble(distStr);
+        if (DroneState.IDLE.name().equals(state)) {
+            zoneId = 0;
+        }
+        return new DroneTelemetry(droneId, state, zoneId, agentRem, agentMax, batRem, batMax, dest, dist);
+    }
+
+    private static DroneTelemetry parseDroneTelemetryFromChannel(String[] parts) {
+        int droneId = Integer.parseInt(parts[1].trim());
+        String state = parts[2].trim();
+        String zoneStr = parts[3].trim();
+        Integer zoneId = zoneStr.isEmpty() ? null : Integer.parseInt(zoneStr);
+        int agentRem = Integer.parseInt(parts[4].trim());
+        int agentMax = Integer.parseInt(parts[5].trim());
+        double batRem = Double.parseDouble(parts[6].trim());
+        double batMax = Double.parseDouble(parts[7].trim());
+        String dz = parts[8].trim();
+        Integer dest = dz.isEmpty() ? null : Integer.parseInt(dz);
+        String distStr = parts[9].trim();
+        Double dist = distStr.isEmpty() ? null : Double.parseDouble(distStr);
+        if (DroneState.IDLE.name().equals(state)) {
+            zoneId = 0;
+        }
+        return new DroneTelemetry(droneId, state, zoneId, agentRem, agentMax, batRem, batMax, dest, dist);
+    }
+
+    /**
      * Updates drone state and zone; if state is {@link DroneState#UNAVAILABLE} or {@link DroneState#OFFLINE},
      * re-queues any in-progress incident for that drone.
      *
@@ -622,6 +696,10 @@ public class Scheduler implements Runnable, SchedulerInterface {
 
     private void fireDroneStateChanged(int droneId, String state, Integer zoneId) {
         for (SchedulerListener l : listeners) l.onDroneStateChanged(droneId, state, zoneId);
+    }
+
+    private void fireDroneTelemetryUpdated(DroneTelemetry t) {
+        for (SchedulerListener l : listeners) l.onDroneTelemetryUpdated(t);
     }
 
     private void fireLog(String message) {
@@ -740,6 +818,42 @@ public class Scheduler implements Runnable, SchedulerInterface {
         return droneZoneById.get(droneId);
     }
 
+    /**
+     * Clears all incident queues, in-progress assignments, and callbacks for a fresh simulation run
+     * (e.g. GUI "Restart"). Known drones are marked {@link DroneState#IDLE} at zone 0.
+     * If the UDP receive loop had stopped after a completed run, it is started again.
+     */
+    public synchronized void resetForNewSimulationRun() {
+        fifoQueue.clear();
+        queuesByZoneAndSeverity.clear();
+        fireStates.clear();
+        callbacksByKey.clear();
+        inProgressByZone.clear();
+        inProgressByDrone.clear();
+        fireIncidentFinished = false;
+        schedulerState = SchedulerState.IDLE;
+
+        HashSet<Integer> known = new HashSet<>();
+        known.addAll(idleDrones);
+        known.addAll(droneAddresses.keySet());
+        known.addAll(droneStateById.keySet());
+        droneTelemetryById.clear();
+        idleDrones.clear();
+        for (Integer id : known) {
+            idleDrones.add(id);
+            droneStateById.put(id, DroneState.IDLE.name());
+            droneZoneById.put(id, 0);
+        }
+        notifyAll();
+
+        if (udpEnabled && receiveSocket != null && !receiveSocket.isClosed() && !running) {
+            running = true;
+            Thread t = new Thread(this, "Scheduler");
+            t.setDaemon(true);
+            t.start();
+        }
+    }
+
     /** Stops UDP receive loop and closes sockets. */
     public synchronized void shutdown() {
         running = false;
@@ -789,13 +903,13 @@ public class Scheduler implements Runnable, SchedulerInterface {
      */
     public synchronized void onDroneFaultDetected(int droneId, String faultMessage, boolean isHardFault) {
         fireLog("[Scheduler] Drone " + droneId + " fault detected: " + faultMessage);
-        notifyListenersDroneFault(droneId, faultMessage);
+        notifyListenersDroneFault(droneId, faultMessage, isHardFault);
         handleFaultyDrone(droneId, isHardFault);
     }
 
-    private void notifyListenersDroneFault(int droneId, String faultMessage) {
+    private void notifyListenersDroneFault(int droneId, String faultMessage, boolean isHardFault) {
         for (SchedulerListener listener : listeners) {
-            listener.onDroneFaultDetected(droneId, faultMessage);
+            listener.onDroneFaultDetected(droneId, faultMessage, isHardFault);
         }
     }
 

@@ -1,5 +1,6 @@
 package fireincident.udp;
 
+import model.DroneTelemetry;
 import model.Incident;
 
 /**
@@ -42,6 +43,19 @@ public final class DronePacketBuilder {
     public static byte[] reportState(int droneId, String state, Integer zoneId) {
         String z = (zoneId == null) ? "" : String.valueOf(zoneId);
         return ("REPORT_STATE" + SEP + droneId + SEP + state + SEP + z).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /**
+     * REPORT_STATE|droneId|state|zone|agentRem|agentMax|batteryRem|batteryMax|destZone|distM
+     */
+    public static byte[] reportStateTelemetry(DroneTelemetry t) {
+        String z = t.zoneId() == null ? "" : String.valueOf(t.zoneId());
+        String dz = t.destinationZoneId() == null ? "" : String.valueOf(t.destinationZoneId());
+        String dist = t.distanceToDestinationMeters() == null ? "" : String.valueOf(t.distanceToDestinationMeters());
+        String line = "REPORT_STATE" + SEP + t.droneId() + SEP + t.state() + SEP + z + SEP
+                + t.agentRemainingLitres() + SEP + t.agentCapacityLitres() + SEP
+                + t.batteryRemainingSeconds() + SEP + t.batteryMaxSeconds() + SEP + dz + SEP + dist;
+        return line.getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     /** Response to REQUEST_WORK: assign an incident to the drone. */

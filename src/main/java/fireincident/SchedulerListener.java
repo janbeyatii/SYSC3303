@@ -1,5 +1,6 @@
 package fireincident;
 
+import model.DroneTelemetry;
 import model.Incident;
 
 /**
@@ -11,9 +12,17 @@ public interface SchedulerListener {
     void onIncidentDispatched(int droneId, Incident incident);
     void onIncidentCompleted(int droneId, Incident incident);
     void onDroneStateChanged(int droneId, String state, Integer zoneId);
+
+    /** Rich drone snapshot (agent, battery, distance); default no-op for tests. */
+    default void onDroneTelemetryUpdated(DroneTelemetry telemetry) {
+    }
+
     void onLog(String message);
     /** Called when all incidents are done and all drones at base; scheduler is shutting down. */
-    void onDroneFaultDetected(int droneId, String faultMessage); // New method
+    /**
+     * @param isHardFault {@code true} if the drone is retired ({@code OFFLINE}), {@code false} for soft ({@code UNAVAILABLE})
+     */
+    void onDroneFaultDetected(int droneId, String faultMessage, boolean isHardFault);
     void onSimulationComplete();
 
 

@@ -1,5 +1,6 @@
 package fireincident;
 
+import model.DroneTelemetry;
 import model.Incident;
 
 /**
@@ -26,4 +27,9 @@ public interface IDroneSchedulerChannel {
     void reportReturnToBase(int droneId);
 
     void updateDroneState(int droneId, String state, Integer zoneId);
+
+    /** Full telemetry over UDP channel; default falls back to basic state only. */
+    default void updateDroneTelemetry(DroneTelemetry t) {
+        updateDroneState(t.droneId(), t.state(), t.zoneId());
+    }
 }
