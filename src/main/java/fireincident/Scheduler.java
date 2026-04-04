@@ -2,6 +2,7 @@ package fireincident;
 
 import model.DroneTelemetry;
 import model.Incident;
+import model.SimulationMetricsReport;
 import model.ZoneConfig;
 import fireincident.udp.MessageType;
 import fireincident.udp.Ports;
@@ -14,6 +15,12 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
@@ -26,6 +33,9 @@ import java.util.*;
  * for pull-based drones.
  */
 public class Scheduler implements Runnable, SchedulerInterface {
+    /** When push-drone agent is unknown, assume a full standard tank for dispatch eligibility. */
+    private static final int DEFAULT_PUSH_DRONE_AGENT_L = 100;
+
     DatagramPacket sendPacket, receivePacket;
     DatagramSocket sendSocket, receiveSocket;
 
@@ -61,6 +71,22 @@ public class Scheduler implements Runnable, SchedulerInterface {
     private final boolean udpEnabled;
     private volatile boolean fireIncidentFinished = false;
     private final ZoneConfig zoneConfig;
+
+    /** Iteration 5: last known agent per drone (from telemetry, channel pull, or idle-at-base). */
+    private final Map<Integer, Integer> droneAgentRemainingById = new HashMap<>();
+    private final Map<Integer, Integer> droneAgentCapacityById = new HashMap<>();
+
+    private long metricsFirstIncidentWallMs = -1;
+    private long metricsLastCompletedWallMs = -1;
+    private final Map<String, Long> incidentQueuedWallMs = new HashMap<>();
+    private final List<Long> metricsResponseWallMs = new ArrayList<>();
+    private double metricsTotalDispatchDistanceM = 0;
+
+    private final Map<Integer, Long> droneIdleAccumMs = new HashMap<>();
+    private final Map<Integer, Long> droneFlightAccumMs = new HashMap<>();
+    private final Map<Integer, Long> droneLastTransitionWallMs = new HashMap<>();
+
+    private volatile SimulationMetricsReport lastMetricsReport = SimulationMetricsReport.empty();
 
     /** Test helper: in-process scheduler without UDP sockets. */
     public Scheduler() {
@@ -229,6 +255,8 @@ public class Scheduler implements Runnable, SchedulerInterface {
         if (!idleDrones.contains(droneId)) {
             idleDrones.add(droneId);
         }
+        int cap = droneAgentCapacityById.getOrDefault(droneId, DEFAULT_PUSH_DRONE_AGENT_L);
+        droneAgentRemainingById.put(droneId, cap);
         updateDroneState(droneId, DroneState.IDLE.name(), 0); // Idle = at base (zone 0)
         dispatchPending();
     }
@@ -294,6 +322,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
                 if (agentRemaining < 0) agentRemaining = 0;
             } catch (NumberFormatException ignored) { }
         }
+        droneAgentRemainingById.put(droneId, agentRemaining);
         updateDroneState(droneId, DroneState.IDLE.name(), currentZone);
         Job job = pollNextJobForDrone(droneId, agentRemaining);
         if (job != null) {
@@ -394,6 +423,10 @@ public class Scheduler implements Runnable, SchedulerInterface {
         if (!fireIncidentFinished || hasAnyPending() || !inProgressByZone.isEmpty()) return;
         if (!allDronesIdle()) return;
         fireLog("[Scheduler] All fires out, all drones at base. Shutting down.");
+        SimulationMetricsReport report = buildMetricsReport();
+        writeMetricsToFile(report);
+        fireSimulationMetrics(report);
+        fireLog("[Scheduler] Metrics: " + report.toLogString());
         for (SchedulerListener l : listeners) l.onSimulationComplete();
         sendShutdownToDrones();
         running = false;
@@ -457,8 +490,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
             NextJobResult next = getNextJobForDispatch();
             if (next == null) break;
 
-            int droneId = selectBestPushDrone(next.zoneId);
-            if (droneId == -1) break;
+            int droneId = next.droneId;
 
             idleDrones.remove((Integer) droneId);
             inProgressByZone.put(next.job.incident.getZoneId(), next.job);
@@ -477,11 +509,20 @@ public class Scheduler implements Runnable, SchedulerInterface {
 
     private static class NextJobResult {
         final Job job;
-        final int zoneId;
-        NextJobResult(Job job, int zoneId) { this.job = job; this.zoneId = zoneId; }
+        final int droneId;
+        NextJobResult(Job job, int droneId) {
+            this.job = job;
+            this.droneId = droneId;
+        }
     }
 
     private void addToQueue(Job job) {
+        long now = System.currentTimeMillis();
+        if (metricsFirstIncidentWallMs < 0) {
+            metricsFirstIncidentWallMs = now;
+        }
+        incidentQueuedWallMs.put(job.incident.getKey(), now);
+
         int zoneId = job.incident.getZoneId();
         int severity = job.incident.getSeverity();
         queuesByZoneAndSeverity.computeIfAbsent(zoneId, k -> new HashMap<>())
@@ -494,26 +535,31 @@ public class Scheduler implements Runnable, SchedulerInterface {
         return !fifoQueue.isEmpty();
     }
 
-    /** FIFO: picks oldest pending job, assigns to closest idle drone. Returns null if none dispatchable. */
+    /**
+     * FIFO: assigns only the head of the queue when some idle <b>push</b> drone has enough agent
+     * to fully service that incident (Iteration 5 capacity). Closest eligible drone wins.
+     */
     private NextJobResult getNextJobForDispatch() {
         Job job = fifoQueue.peekFirst();
         if (job == null) return null;
         int zoneId = job.incident.getZoneId();
-        int droneId = selectBestPushDrone(zoneId);
+        int needed = job.incident.getSeverity();
+        int droneId = selectBestPushDrone(zoneId, needed);
         if (droneId == -1) return null;
         removeJobFromQueue(job);
-        return new NextJobResult(job, zoneId);
+        return new NextJobResult(job, droneId);
     }
 
-    /** FIFO: gives drone the oldest job it can handle (agentRemaining >= severity). */
+    /**
+     * Strict FIFO: only the head incident may be taken, and only if {@code agentRemaining}
+     * is sufficient so the drone can apply full suppression before returning to refill.
+     */
     private Job pollNextJobForDrone(int droneId, int agentRemaining) {
-        for (Job job : fifoQueue) {
-            if (job.incident.getSeverity() <= agentRemaining) {
-                removeJobFromQueue(job);
-                return job;
-            }
-        }
-        return null;
+        Job head = fifoQueue.peekFirst();
+        if (head == null) return null;
+        if (head.incident.getSeverity() > agentRemaining) return null;
+        removeJobFromQueue(head);
+        return head;
     }
 
     private void removeJobFromQueue(Job job) {
@@ -536,11 +582,16 @@ public class Scheduler implements Runnable, SchedulerInterface {
         fifoQueue.addFirst(job);
     }
 
-    private int selectBestPushDrone(int zoneId) {
+    /**
+     * Closest idle push drone (not on pull channel) with at least {@code minAgentLitres} remaining.
+     */
+    private int selectBestPushDrone(int zoneId, int minAgentLitres) {
         int best = -1;
         double minDist = Double.MAX_VALUE;
         for (int droneId : idleDrones) {
             if (droneAddresses.containsKey(droneId)) continue;
+            int agent = droneAgentRemainingById.getOrDefault(droneId, DEFAULT_PUSH_DRONE_AGENT_L);
+            if (agent < minAgentLitres) continue;
             Integer zone = droneZoneById.get(droneId);
             if (zone == null) zone = 0;
             double d;
@@ -580,6 +631,8 @@ public class Scheduler implements Runnable, SchedulerInterface {
     }
 
     private void applyTelemetryAndMaybeUpdateState(DroneTelemetry dt) {
+        droneAgentRemainingById.put(dt.droneId(), dt.agentRemainingLitres());
+        droneAgentCapacityById.put(dt.droneId(), dt.agentCapacityLitres());
         droneTelemetryById.put(dt.droneId(), dt);
         fireDroneTelemetryUpdated(dt);
         String prev = droneStateById.get(dt.droneId());
@@ -637,6 +690,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
      * @param zoneId  current zone, or {@code null} if unknown / in transit
      */
     public synchronized void updateDroneState(int droneId, String state, Integer zoneId) {
+        recordDroneStateSegmentEnd(droneId);
         if (state != null) {
             droneStateById.put(droneId, state);
             if (DroneState.IDLE.name().equals(state)) {
@@ -659,7 +713,95 @@ public class Scheduler implements Runnable, SchedulerInterface {
             }
         }
         if (zoneId != null) droneZoneById.put(droneId, zoneId);
+        droneLastTransitionWallMs.put(droneId, System.currentTimeMillis());
         fireDroneStateChanged(droneId, state, zoneId);
+    }
+
+    private void recordDroneStateSegmentEnd(int droneId) {
+        long now = System.currentTimeMillis();
+        String prev = droneStateById.get(droneId);
+        Long last = droneLastTransitionWallMs.get(droneId);
+        if (last != null && prev != null) {
+            long delta = Math.max(0, now - last);
+            if (DroneState.IDLE.name().equals(prev)) {
+                droneIdleAccumMs.merge(droneId, delta, Long::sum);
+            } else if (DroneState.EN_ROUTE.name().equals(prev) || DroneState.RETURNING.name().equals(prev)) {
+                droneFlightAccumMs.merge(droneId, delta, Long::sum);
+            }
+        }
+    }
+
+    private void noteDispatchDistance(int droneId, Incident incident) {
+        if (incident == null) return;
+        Integer z = droneZoneById.get(droneId);
+        int from = z != null ? z : 0;
+        int to = incident.getZoneId();
+        try {
+            if (zoneConfig.hasZone(from) && zoneConfig.hasZone(to)) {
+                metricsTotalDispatchDistanceM += zoneConfig.getDistanceMeters(from, to);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void noteIncidentCompletedMetrics(Incident incident) {
+        if (incident == null) return;
+        long done = System.currentTimeMillis();
+        metricsLastCompletedWallMs = done;
+        Long q = incidentQueuedWallMs.remove(incident.getKey());
+        if (q != null) {
+            metricsResponseWallMs.add(Math.max(0, done - q));
+        }
+    }
+
+    private SimulationMetricsReport buildMetricsReport() {
+        long mission = 0;
+        if (metricsFirstIncidentWallMs >= 0 && metricsLastCompletedWallMs >= metricsFirstIncidentWallMs) {
+            mission = metricsLastCompletedWallMs - metricsFirstIncidentWallMs;
+        }
+        int n = metricsResponseWallMs.size();
+        double avgResp = 0;
+        if (n > 0) {
+            long sum = 0;
+            for (Long v : metricsResponseWallMs) sum += v;
+            avgResp = (double) sum / n;
+        }
+        int droneCount = Math.max(1, droneIdleAccumMs.size());
+        long idleSum = 0;
+        for (Long v : droneIdleAccumMs.values()) idleSum += v;
+        double avgIdle = (double) idleSum / droneCount;
+        int flightDroneCount = Math.max(1, droneFlightAccumMs.size());
+        long flightSum = 0;
+        for (Long v : droneFlightAccumMs.values()) flightSum += v;
+        double avgFlight = (double) flightSum / flightDroneCount;
+        return new SimulationMetricsReport(mission, n, avgResp, metricsTotalDispatchDistanceM, avgIdle, avgFlight);
+    }
+
+    private void writeMetricsToFile(SimulationMetricsReport r) {
+        try {
+            Path dir = Paths.get("logs");
+            Files.createDirectories(dir);
+            String stamp = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").format(LocalDateTime.now());
+            Path file = dir.resolve("simulation-metrics-" + stamp + "-" + System.currentTimeMillis() + ".txt");
+            List<Integer> ids = SimulationMetricsReport.sortedIds(droneIdleAccumMs.keySet());
+            String body = r.toDetailedString(ids) + "\n" + r.toLogString() + "\n";
+            Files.writeString(file, body, StandardCharsets.UTF_8, StandardOpenOption.CREATE);
+            fireLog("[Scheduler] Wrote metrics: " + file.toAbsolutePath());
+        } catch (Exception e) {
+            System.err.println("[Scheduler] Could not write metrics file: " + e.getMessage());
+        }
+    }
+
+    private void fireSimulationMetrics(SimulationMetricsReport report) {
+        lastMetricsReport = report;
+        for (SchedulerListener l : listeners) {
+            l.onSimulationMetrics(report);
+        }
+    }
+
+    /** Last completed run summary, or {@link SimulationMetricsReport#empty()} if none. */
+    public SimulationMetricsReport getSimulationMetricsReport() {
+        return lastMetricsReport;
     }
 
     /** @return number of pending incidents not yet assigned */
@@ -687,10 +829,12 @@ public class Scheduler implements Runnable, SchedulerInterface {
     }
 
     private void fireIncidentDispatched(int droneId, Incident incident) {
+        noteDispatchDistance(droneId, incident);
         for (SchedulerListener l : listeners) l.onIncidentDispatched(droneId, incident);
     }
 
     private void fireIncidentCompleted(int droneId, Incident incident) {
+        noteIncidentCompletedMetrics(incident);
         for (SchedulerListener l : listeners) l.onIncidentCompleted(droneId, incident);
     }
 
@@ -753,6 +897,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
      */
     public synchronized Incident requestWork(int droneId, int currentZone, int agentRemaining) {
         updateDroneState(droneId, DroneState.IDLE.name(), currentZone);
+        droneAgentRemainingById.put(droneId, agentRemaining);
         while (!hasAnyPending()) {
             try {
                 wait();
@@ -762,13 +907,17 @@ public class Scheduler implements Runnable, SchedulerInterface {
             }
         }
         Job job = pollNextJobForDrone(droneId, agentRemaining);
-        if (job == null) return null;
+        if (job == null) {
+            notifyAll();
+            return null;
+        }
         inProgressByZone.put(job.incident.getZoneId(), job);
         inProgressByDrone.put(droneId, job);
         fireStates.put(job.incident.getKey(), FireState.ASSIGNED);
         schedulerState = SchedulerState.DRONE_BUSY;
         fireLog("[Scheduler] Dispatched incident to Drone " + droneId + ": " + job.incident);
         fireIncidentDispatched(droneId, job.incident);
+        notifyAll();
         return job.incident;
     }
 
@@ -838,11 +987,23 @@ public class Scheduler implements Runnable, SchedulerInterface {
         known.addAll(droneAddresses.keySet());
         known.addAll(droneStateById.keySet());
         droneTelemetryById.clear();
+        droneAgentRemainingById.clear();
+        droneAgentCapacityById.clear();
+        metricsFirstIncidentWallMs = -1;
+        metricsLastCompletedWallMs = -1;
+        incidentQueuedWallMs.clear();
+        metricsResponseWallMs.clear();
+        metricsTotalDispatchDistanceM = 0;
+        droneIdleAccumMs.clear();
+        droneFlightAccumMs.clear();
+        droneLastTransitionWallMs.clear();
+        lastMetricsReport = SimulationMetricsReport.empty();
         idleDrones.clear();
         for (Integer id : known) {
             idleDrones.add(id);
             droneStateById.put(id, DroneState.IDLE.name());
             droneZoneById.put(id, 0);
+            droneAgentRemainingById.put(id, DEFAULT_PUSH_DRONE_AGENT_L);
         }
         notifyAll();
 

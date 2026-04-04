@@ -153,6 +153,21 @@ public class DroneSubsystem implements Runnable {
         while (!Thread.currentThread().isInterrupted()) {
             Incident incident = channel.requestWork(droneId, currentZone, agentRemaining);
             if (incident == null) {
+                Incident peek = channel.peekNextIncident();
+                if (peek != null && peek.getSeverity() > agentRemaining) {
+                    try {
+                        returnToBaseAndRefill(reporter, currentZone, peek);
+                        currentZone = 0;
+                        reporter.updateState(DroneState.IDLE.name(), null);
+                    } catch (DroneFaultException e) {
+                        System.err.println("[Drone " + droneId + "] " + e.getMessage());
+                        break;
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                    continue;
+                }
                 try {
                     Thread.sleep(50);
                 } catch (InterruptedException e) {

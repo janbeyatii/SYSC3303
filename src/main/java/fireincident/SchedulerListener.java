@@ -2,6 +2,7 @@ package fireincident;
 
 import model.DroneTelemetry;
 import model.Incident;
+import model.SimulationMetricsReport;
 
 /**
  * Listener for scheduler events (incident queued, dispatched, completed;
@@ -25,5 +26,8 @@ public interface SchedulerListener {
     void onDroneFaultDetected(int droneId, String faultMessage, boolean isHardFault);
     void onSimulationComplete();
 
+    /** Iteration 5: final (or best-effort) performance snapshot when the run ends. */
+    default void onSimulationMetrics(SimulationMetricsReport report) {
+    }
 
 }

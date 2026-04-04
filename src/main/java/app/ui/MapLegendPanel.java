@@ -15,6 +15,8 @@ public final class MapLegendPanel extends JPanel {
         setOpaque(false);
         setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
 
+        add(row("Zone 0 — refill / base", new Color(0x94A3B8)));
+        add(Box.createVerticalStrut(6));
         add(row("Queued", DashboardTheme.ZONE_QUEUED));
         add(Box.createVerticalStrut(6));
         add(row("Active fire", DashboardTheme.ZONE_ACTIVE));
