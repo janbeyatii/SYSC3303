@@ -1,0 +1,12 @@
+Jan
+* Enforced agent capacity with strict FIFO
+* Tracked per-drone agent from telemetry
+* Implemented performance instrumentation:
+* Added `SimulationMetricsReport`
+* Finalized dispatcher GUI
+
+Iman
+
+Samy
+
+Mithushan

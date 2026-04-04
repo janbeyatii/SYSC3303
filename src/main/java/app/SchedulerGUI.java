@@ -9,6 +9,7 @@ import fireincident.Scheduler;
 import fireincident.SchedulerListener;
 import model.DroneTelemetry;
 import model.Incident;
+import model.SimulationMetricsReport;
 import model.ZoneConfig;
 
 import javax.swing.*;
@@ -21,7 +22,9 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -34,13 +37,14 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
     private static final int INC_COL_STATUS = 6;
     private static final int INC_COL_DRONE = 7;
 
-    private static final int DRONE_COL_STATE = 1;
-    private static final int DRONE_COL_ZONE = 2;
-    private static final int DRONE_COL_DEST = 3;
-    private static final int DRONE_COL_DIST = 4;
-    private static final int DRONE_COL_AGENT = 5;
-    private static final int DRONE_COL_BATTERY = 6;
-    private static final int DRONE_COL_TIME = 7;
+    private static final int DRONE_COL_HEALTH = 1;
+    private static final int DRONE_COL_STATE = 2;
+    private static final int DRONE_COL_ZONE = 3;
+    private static final int DRONE_COL_DEST = 4;
+    private static final int DRONE_COL_DIST = 5;
+    private static final int DRONE_COL_AGENT = 6;
+    private static final int DRONE_COL_BATTERY = 7;
+    private static final int DRONE_COL_TIME = 8;
 
     private final Scheduler scheduler;
     private final SimConfig simConfig;
@@ -67,6 +71,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
 
     private ZoneMapPanel zoneMapPanel;
     private DashboardEventLog eventLog;
+    private JTextArea metricsArea;
 
     private JPanel alertBanner;
     private JLabel alertHeadline;
@@ -113,6 +118,16 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         return String.format("%.0f / %.0f s", rem, max);
     }
 
+    /** Normal vs fault-style states for dispatcher visibility (Iteration 5). */
+    private static String fmtDroneHealth(String state) {
+        if (state == null) return "—";
+        String u = state.toUpperCase();
+        if ("OFFLINE".equals(u) || "UNAVAILABLE".equals(u) || "FAULTED".equals(u)) {
+            return "Fault / offline";
+        }
+        return "Normal";
+    }
+
     public SchedulerGUI(Scheduler scheduler) {
         this(scheduler, "data/iteration4/iter4_fault_mixed.csv", new SimConfig());
     }
@@ -131,7 +146,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
                 : "data/iteration4/iter4_fault_mixed.csv";
 
         this.scheduler.addListener(this);
-        setTitle("Firefighting Drone Swarm — Scheduler");
+        setTitle("Firefighting Drone Swarm — Dispatcher console (Iteration 5)");
         setMinimumSize(new Dimension(1024, 680));
         setSize(1180, 760);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -265,7 +280,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         ((JComponent) incidentPanel.getComponent(0)).setBorder(sectionTitle("Incidents"));
 
         droneModel = new DefaultTableModel(
-                new Object[]{"Drone", "State", "Zone", "Dest", "Dist (m)", "Agent", "Battery", "Last update"}, 0
+                new Object[]{"Drone", "Health", "State", "Zone", "Dest", "Dist (m)", "Agent (fuel)", "Battery", "Last update"}, 0
         ) {
             @Override
             public boolean isCellEditable(int r, int c) {
@@ -276,7 +291,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         droneTable.setRowHeight(26);
         droneTable.setAutoCreateRowSorter(true);
         applyTableStyle(droneTable);
-        droneTable.getColumnModel().getColumn(1).setCellRenderer(new BadgeCellRenderer(BadgeCellRenderer.Kind.DRONE_STATE));
+        droneTable.getColumnModel().getColumn(DRONE_COL_STATE).setCellRenderer(new BadgeCellRenderer(BadgeCellRenderer.Kind.DRONE_STATE));
 
         JPanel dronePanel = DashboardTheme.wrapCard(new JScrollPane(droneTable));
         ((JComponent) dronePanel.getComponent(0)).setBorder(sectionTitle("Drones"));
@@ -303,7 +318,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         centerSplit.setRightComponent(tablesSplit);
 
         eventLog = new DashboardEventLog();
-        eventLog.setPreferredSize(new Dimension(200, 160));
+        eventLog.setPreferredSize(new Dimension(200, 140));
 
         JPanel logPanel = new JPanel(new BorderLayout(0, 4));
         logPanel.setOpaque(false);
@@ -322,10 +337,37 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         logSouth.add(clearLogBtn);
         logPanel.add(logSouth, BorderLayout.SOUTH);
 
+        metricsArea = new JTextArea(5, 42);
+        metricsArea.setEditable(false);
+        metricsArea.setLineWrap(true);
+        metricsArea.setWrapStyleWord(true);
+        metricsArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 11));
+        metricsArea.setBackground(new Color(0xF8FAFC));
+        metricsArea.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
+        metricsArea.setText("Performance metrics (Iteration 5) appear here when the scheduler finishes a run.\n");
+
+        JScrollPane metricsScroll = new JScrollPane(metricsArea);
+        metricsScroll.setPreferredSize(new Dimension(200, 120));
+        JPanel metricsPanel = new JPanel(new BorderLayout());
+        metricsPanel.setOpaque(false);
+        metricsPanel.setBorder(BorderFactory.createTitledBorder(
+                BorderFactory.createEmptyBorder(),
+                "Performance metrics — mission time, response times, distances, idle / flight",
+                javax.swing.border.TitledBorder.LEFT,
+                javax.swing.border.TitledBorder.TOP,
+                DashboardTheme.uiFont(12f).deriveFont(Font.BOLD),
+                DashboardTheme.TEXT_MUTED));
+        metricsPanel.add(metricsScroll, BorderLayout.CENTER);
+
+        JSplitPane logMetricsSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
+        logMetricsSplit.setResizeWeight(0.55);
+        logMetricsSplit.setTopComponent(logPanel);
+        logMetricsSplit.setBottomComponent(metricsPanel);
+
         JSplitPane vertical = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
         vertical.setResizeWeight(0.72);
         vertical.setTopComponent(centerSplit);
-        vertical.setBottomComponent(logPanel);
+        vertical.setBottomComponent(logMetricsSplit);
 
         alertBanner = buildAlertBanner();
 
@@ -432,8 +474,8 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         Map<Integer, String> droneStates = new HashMap<>();
         for (int r = 0; r < droneModel.getRowCount(); r++) {
             Object idObj = droneModel.getValueAt(r, 0);
-            Object stateObj = droneModel.getValueAt(r, 1);
-            Object zoneObj = droneModel.getValueAt(r, 2);
+            Object stateObj = droneModel.getValueAt(r, DRONE_COL_STATE);
+            Object zoneObj = droneModel.getValueAt(r, DRONE_COL_ZONE);
             if (idObj == null) continue;
             int droneId = idObj instanceof Number ? ((Number) idObj).intValue() : Integer.parseInt(String.valueOf(idObj));
             if (stateObj != null) droneStates.put(droneId, stateObj.toString());
@@ -478,7 +520,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
 
         int idle = 0, busy = 0, fault = 0;
         for (int r = 0; r < droneModel.getRowCount(); r++) {
-            Object s = droneModel.getValueAt(r, 1);
+            Object s = droneModel.getValueAt(r, DRONE_COL_STATE);
             if (s == null) continue;
             String u = s.toString().toUpperCase();
             if ("IDLE".equals(u)) idle++;
@@ -537,6 +579,9 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         droneRowById.clear();
         droneAnimations.clear();
         completedIncidentCount = 0;
+        if (metricsArea != null) {
+            metricsArea.setText("Performance metrics (Iteration 5) appear here when the scheduler finishes a run.\n");
+        }
         refreshKpiStrip();
         refreshZoneMap();
     }
@@ -806,7 +851,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
             int fromZone = 0;
             Integer row = droneRowById.get(droneId);
             if (row != null) {
-                Object zoneObj = droneModel.getValueAt(row, 2);
+                Object zoneObj = droneModel.getValueAt(row, DRONE_COL_ZONE);
                 if (zoneObj != null && !"-".equals(zoneObj.toString().trim())) {
                     try {
                         fromZone = Integer.parseInt(zoneObj.toString().trim());
@@ -828,6 +873,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
                 row = droneModel.getRowCount();
                 droneModel.addRow(new Object[]{
                         droneId,
+                        fmtDroneHealth(state),
                         state,
                         zoneId == null ? "-" : zoneId,
                         "-",
@@ -838,7 +884,10 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
                 });
                 droneRowById.put(droneId, row);
             } else {
-                if (state != null) droneModel.setValueAt(state, row, DRONE_COL_STATE);
+                if (state != null) {
+                    droneModel.setValueAt(fmtDroneHealth(state), row, DRONE_COL_HEALTH);
+                    droneModel.setValueAt(state, row, DRONE_COL_STATE);
+                }
                 if (zoneId != null) droneModel.setValueAt(zoneId, row, DRONE_COL_ZONE);
                 else droneModel.setValueAt("-", row, DRONE_COL_ZONE);
                 droneModel.setValueAt(timestamp(), row, DRONE_COL_TIME);
@@ -856,6 +905,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
                 row = droneModel.getRowCount();
                 droneModel.addRow(new Object[]{
                         t.droneId(),
+                        fmtDroneHealth(t.state()),
                         t.state(),
                         t.zoneId() == null ? "-" : t.zoneId(),
                         fmtDroneDest(t.destinationZoneId()),
@@ -866,7 +916,10 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
                 });
                 droneRowById.put(t.droneId(), row);
             } else {
-                if (t.state() != null) droneModel.setValueAt(t.state(), row, DRONE_COL_STATE);
+                if (t.state() != null) {
+                    droneModel.setValueAt(fmtDroneHealth(t.state()), row, DRONE_COL_HEALTH);
+                    droneModel.setValueAt(t.state(), row, DRONE_COL_STATE);
+                }
                 if (t.zoneId() != null) droneModel.setValueAt(t.zoneId(), row, DRONE_COL_ZONE);
                 else droneModel.setValueAt("-", row, DRONE_COL_ZONE);
                 droneModel.setValueAt(fmtDroneDest(t.destinationZoneId()), row, DRONE_COL_DEST);
@@ -891,8 +944,36 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
             setSystemStatus("Simulation complete");
             showAlert(AlertKind.INFO, "Scheduler simulation complete",
                     "The scheduler has finished its run (e.g. all work drained or stopped).");
+            refreshMetricsPanel();
             refreshCounts();
         });
+    }
+
+    @Override
+    public void onSimulationMetrics(SimulationMetricsReport report) {
+        SwingUtilities.invokeLater(() -> applyMetricsReport(report));
+    }
+
+    private void refreshMetricsPanel() {
+        applyMetricsReport(scheduler.getSimulationMetricsReport());
+    }
+
+    private void applyMetricsReport(SimulationMetricsReport report) {
+        if (metricsArea == null || report == null) return;
+        List<Integer> ids = new ArrayList<>();
+        for (int r = 0; r < droneModel.getRowCount(); r++) {
+            Object idObj = droneModel.getValueAt(r, 0);
+            if (idObj instanceof Number) {
+                ids.add(((Number) idObj).intValue());
+            } else if (idObj != null) {
+                try {
+                    ids.add(Integer.parseInt(idObj.toString().trim()));
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+        metricsArea.setText(report.toDetailedString(SimulationMetricsReport.sortedIds(ids)));
+        metricsArea.setCaretPosition(0);
     }
 
     @Override
@@ -909,6 +990,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
                 row = droneModel.getRowCount();
                 droneModel.addRow(new Object[]{
                         droneId,
+                        fmtDroneHealth(newState),
                         newState,
                         "-",
                         "-",
@@ -919,6 +1001,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
                 });
                 droneRowById.put(droneId, row);
             } else {
+                droneModel.setValueAt(fmtDroneHealth(newState), row, DRONE_COL_HEALTH);
                 droneModel.setValueAt(newState, row, DRONE_COL_STATE);
                 droneModel.setValueAt(timestamp(), row, DRONE_COL_TIME);
             }
