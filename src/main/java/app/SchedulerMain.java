@@ -3,6 +3,7 @@ package app;
 import com.formdev.flatlaf.FlatLightLaf;
 import fireincident.Scheduler;
 import fireincident.udp.Ports;
+import model.ZoneConfig;
 
 import javax.swing.*;
 
@@ -28,7 +29,7 @@ public class SchedulerMain {
 
         SimConfig config = new SimConfig();
 
-        Scheduler scheduler = new Scheduler(true);
+        Scheduler scheduler = new Scheduler(true, new ZoneConfig(), config.getDroneTimeScale());
         Thread schedulerThread = new Thread(scheduler, "Scheduler");
         schedulerThread.setDaemon(true);
         schedulerThread.start();

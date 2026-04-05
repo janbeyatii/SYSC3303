@@ -1,6 +1,7 @@
 package app;
 
 import fireincident.Scheduler;
+import model.ZoneConfig;
 
 import javax.swing.*;
 
@@ -23,7 +24,7 @@ public class Main {
 
         SimConfig config = new SimConfig();
 
-        Scheduler scheduler = new Scheduler(true);
+        Scheduler scheduler = new Scheduler(true, new ZoneConfig(), config.getDroneTimeScale());
         Thread schedulerThread = new Thread(scheduler, "Scheduler");
         schedulerThread.setDaemon(true);
         schedulerThread.start();
