@@ -20,7 +20,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 
 /**
@@ -71,6 +73,12 @@ public class Scheduler implements Runnable, SchedulerInterface {
     private final boolean udpEnabled;
     private volatile boolean fireIncidentFinished = false;
     private final ZoneConfig zoneConfig;
+    /** From config: wall seconds per simulated second for drones; used only to derive approximate sim times in metrics. */
+    private final double metricsDroneWallTimeScale;
+    private int metricsMinCsvSec = -1;
+    private int metricsMaxCsvSec = -1;
+    /** Ensures metrics file + listeners run once per finished run (UDP and in-process). */
+    private volatile boolean runCompletionHandled = false;
 
     /** Iteration 5: last known agent per drone (from telemetry, channel pull, or idle-at-base). */
     private final Map<Integer, Integer> droneAgentRemainingById = new HashMap<>();
@@ -97,15 +105,28 @@ public class Scheduler implements Runnable, SchedulerInterface {
      * @param udpEnabled if {@code true}, binds {@link Ports#SCHEDULER} and processes {@link UDPMessage} traffic
      */
     public Scheduler(boolean udpEnabled) {
-        this(udpEnabled, new ZoneConfig());
+        this(udpEnabled, new ZoneConfig(), 1.0);
     }
 
     /**
      * @param zoneConfig used for distance-based drone selection when multiple drones are idle
      */
     public Scheduler(boolean udpEnabled, ZoneConfig zoneConfig) {
+        this(udpEnabled, zoneConfig, 1.0);
+    }
+
+    /**
+     * @param droneWallTimeScaleForMetrics {@link app.SimConfig#getDroneTimeScale()} — wall seconds per simulated second;
+     *                                     used to report approximate simulated mission/response/idle/flight times
+     */
+    public Scheduler(boolean udpEnabled, ZoneConfig zoneConfig, double droneWallTimeScaleForMetrics) {
         this.udpEnabled = udpEnabled;
         this.zoneConfig = zoneConfig != null ? zoneConfig : new ZoneConfig();
+        double ts = droneWallTimeScaleForMetrics > 0 ? droneWallTimeScaleForMetrics : 1.0;
+        if (ts > 1.0) {
+            ts = 1.0;
+        }
+        this.metricsDroneWallTimeScale = ts;
         if (!udpEnabled) {
             return;
         }
@@ -184,7 +205,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
             case NO_MORE_INCIDENTS:
                 fireIncidentFinished = true;
                 fireLog("[Scheduler] Fire Incident Subsystem finished; no more incidents.");
-                checkShutdown();
+                tryCompleteRun();
                 break;
 
             case SHUTDOWN:
@@ -240,7 +261,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
         }
         schedulerState = hasAnyPending() ? SchedulerState.HAS_PENDING : SchedulerState.IDLE;
         dispatchPending();
-        checkShutdown();
+        tryCompleteRun();
     }
 
     private void handleDroneReturning(UDPMessage msg) {
@@ -259,6 +280,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
         droneAgentRemainingById.put(droneId, cap);
         updateDroneState(droneId, DroneState.IDLE.name(), 0); // Idle = at base (zone 0)
         dispatchPending();
+        tryCompleteRun();
     }
 
     private void handleDroneState(UDPMessage msg) {
@@ -369,7 +391,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
         }
         schedulerState = hasAnyPending() ? SchedulerState.HAS_PENDING : SchedulerState.IDLE;
         dispatchPending();
-        checkShutdown();
+        tryCompleteRun();
         sendToAddress(DronePacketBuilder.ack(), fromAddr, fromPort);
     }
 
@@ -393,7 +415,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
                 idleDrones.add(droneId);
             }
             dispatchPending();
-            checkShutdown();
+            tryCompleteRun();
             sendToAddress(DronePacketBuilder.ack(), fromAddr, fromPort);
             return;
         }
@@ -406,7 +428,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
             idleDrones.add(droneId);
         }
         dispatchPending();
-        checkShutdown();
+        tryCompleteRun();
         sendToAddress(DronePacketBuilder.ack(), fromAddr, fromPort);
     }
 
@@ -418,18 +440,27 @@ public class Scheduler implements Runnable, SchedulerInterface {
         sendToAddress(line.getBytes(StandardCharsets.UTF_8), fromAddr, fromPort);
     }
 
-    private void checkShutdown() {
-        if (!udpEnabled || sendSocket == null) return;
+    /**
+     * When the CSV run is done, nothing is queued or in progress, and every known drone is idle/offline/unavailable,
+     * finalize metrics (always) and optionally stop the UDP receive loop and tell drones to shut down.
+     */
+    private void tryCompleteRun() {
+        if (runCompletionHandled) return;
         if (!fireIncidentFinished || hasAnyPending() || !inProgressByZone.isEmpty()) return;
         if (!allDronesIdle()) return;
-        fireLog("[Scheduler] All fires out, all drones at base. Shutting down.");
+        runCompletionHandled = true;
+        fireLog("[Scheduler] All fires out, all drones at base. Run complete.");
         SimulationMetricsReport report = buildMetricsReport();
         writeMetricsToFile(report);
         fireSimulationMetrics(report);
         fireLog("[Scheduler] Metrics: " + report.toLogString());
-        for (SchedulerListener l : listeners) l.onSimulationComplete();
-        sendShutdownToDrones();
-        running = false;
+        for (SchedulerListener l : listeners) {
+            l.onSimulationComplete();
+        }
+        if (udpEnabled && sendSocket != null) {
+            sendShutdownToDrones();
+            running = false;
+        }
     }
 
     private boolean allDronesIdle() {
@@ -522,6 +553,16 @@ public class Scheduler implements Runnable, SchedulerInterface {
             metricsFirstIncidentWallMs = now;
         }
         incidentQueuedWallMs.put(job.incident.getKey(), now);
+        Integer csvSec = parseIncidentTimeToSecondOfDay(job.incident.getTime());
+        if (csvSec != null) {
+            if (metricsMinCsvSec < 0) {
+                metricsMinCsvSec = csvSec;
+                metricsMaxCsvSec = csvSec;
+            } else {
+                metricsMinCsvSec = Math.min(metricsMinCsvSec, csvSec);
+                metricsMaxCsvSec = Math.max(metricsMaxCsvSec, csvSec);
+            }
+        }
 
         int zoneId = job.incident.getZoneId();
         int severity = job.incident.getSeverity();
@@ -529,6 +570,28 @@ public class Scheduler implements Runnable, SchedulerInterface {
                 .computeIfAbsent(severity, k -> new LinkedList<>())
                 .addLast(job);
         fifoQueue.addLast(job);
+    }
+
+    /** Parses CSV {@code Time} column (e.g. HH:mm:ss) to second-of-day for scenario span only. */
+    private static Integer parseIncidentTimeToSecondOfDay(String time) {
+        if (time == null || time.isBlank()) return null;
+        String t = time.trim();
+        try {
+            return LocalTime.parse(t).toSecondOfDay();
+        } catch (DateTimeParseException ignored) {
+            String[] p = t.split(":");
+            if (p.length >= 3) {
+                try {
+                    int h = Integer.parseInt(p[0].trim());
+                    int m = Integer.parseInt(p[1].trim());
+                    int s = Integer.parseInt(p[2].trim());
+                    if (h >= 0 && h < 24 && m >= 0 && m < 60 && s >= 0 && s < 60) {
+                        return h * 3600 + m * 60 + s;
+                    }
+                } catch (NumberFormatException ignored2) { }
+            }
+            return null;
+        }
     }
 
     private boolean hasAnyPending() {
@@ -628,6 +691,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
      */
     public synchronized void applyDroneTelemetry(DroneTelemetry t) {
         applyTelemetryAndMaybeUpdateState(t);
+        tryCompleteRun();
     }
 
     private void applyTelemetryAndMaybeUpdateState(DroneTelemetry dt) {
@@ -774,7 +838,13 @@ public class Scheduler implements Runnable, SchedulerInterface {
         long flightSum = 0;
         for (Long v : droneFlightAccumMs.values()) flightSum += v;
         double avgFlight = (double) flightSum / flightDroneCount;
-        return new SimulationMetricsReport(mission, n, avgResp, metricsTotalDispatchDistanceM, avgIdle, avgFlight);
+        int csvSpan = -1;
+        if (metricsMinCsvSec >= 0 && metricsMaxCsvSec >= metricsMinCsvSec) {
+            csvSpan = metricsMaxCsvSec - metricsMinCsvSec;
+        }
+        return new SimulationMetricsReport(
+                mission, n, avgResp, metricsTotalDispatchDistanceM, avgIdle, avgFlight,
+                metricsDroneWallTimeScale, csvSpan);
     }
 
     private void writeMetricsToFile(SimulationMetricsReport r) {
@@ -864,7 +934,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
     public synchronized void signalNoMoreIncidents() {
         fireIncidentFinished = true;
         try {
-            checkShutdown();
+            tryCompleteRun();
         } catch (Exception ignored) { }
     }
 
@@ -937,6 +1007,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
         }
         schedulerState = hasAnyPending() ? SchedulerState.HAS_PENDING : SchedulerState.IDLE;
         notifyAll();
+        tryCompleteRun();
     }
 
     /** In-process path: drone arrived at zone. */
@@ -997,6 +1068,9 @@ public class Scheduler implements Runnable, SchedulerInterface {
         droneIdleAccumMs.clear();
         droneFlightAccumMs.clear();
         droneLastTransitionWallMs.clear();
+        metricsMinCsvSec = -1;
+        metricsMaxCsvSec = -1;
+        runCompletionHandled = false;
         lastMetricsReport = SimulationMetricsReport.empty();
         idleDrones.clear();
         for (Integer id : known) {
