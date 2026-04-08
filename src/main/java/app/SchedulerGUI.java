@@ -129,7 +129,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
     }
 
     public SchedulerGUI(Scheduler scheduler) {
-        this(scheduler, "data/iteration4/iter4_fault_mixed.csv", new SimConfig());
+        this(scheduler, "data/final_event_file_w26.csv", new SimConfig());
     }
 
     public SchedulerGUI(Scheduler scheduler, String defaultCsvPath) {
@@ -143,7 +143,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         this.zoneConfig = new ZoneConfig();
         this.defaultCsvPath = defaultCsvPath != null && !defaultCsvPath.isEmpty()
                 ? defaultCsvPath.trim()
-                : "data/iteration4/iter4_fault_mixed.csv";
+                : "data/final_event_file_w26.csv";
 
         this.scheduler.addListener(this);
         setTitle("Firefighting Drone Swarm — Dispatcher console (Iteration 5)");
@@ -344,7 +344,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         metricsArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 11));
         metricsArea.setBackground(new Color(0xF8FAFC));
         metricsArea.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
-        metricsArea.setText("Performance metrics (Iteration 5) appear here when the scheduler finishes a run.\n");
+        metricsArea.setText("Final demo performance metrics appear here when the scheduler finishes a run.\n");
 
         JScrollPane metricsScroll = new JScrollPane(metricsArea);
         metricsScroll.setPreferredSize(new Dimension(200, 120));
@@ -352,7 +352,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         metricsPanel.setOpaque(false);
         metricsPanel.setBorder(BorderFactory.createTitledBorder(
                 BorderFactory.createEmptyBorder(),
-                "Performance metrics — mission time, response times, distances, idle / flight",
+                "Performance metrics — response, completion, utilization, queue",
                 javax.swing.border.TitledBorder.LEFT,
                 javax.swing.border.TitledBorder.TOP,
                 DashboardTheme.uiFont(12f).deriveFont(Font.BOLD),
@@ -580,7 +580,7 @@ public class SchedulerGUI extends JFrame implements SchedulerListener {
         droneAnimations.clear();
         completedIncidentCount = 0;
         if (metricsArea != null) {
-            metricsArea.setText("Performance metrics (Iteration 5) appear here when the scheduler finishes a run.\n");
+            metricsArea.setText("Final demo performance metrics appear here when the scheduler finishes a run.\n");
         }
         refreshKpiStrip();
         refreshZoneMap();

@@ -30,7 +30,7 @@ Run `Main.java` (all-in-one) or run `SchedulerMain`, `DroneMain`, and `FireIncid
 - droneTimeScale: Simulation speed (0.01 = 100× faster)
 - schedulerHost, schedulerPort: Where Fire Incident and drones connect
 
-Sample inputs: `data/Sample_event_file.csv` (legacy 4-field). Default path for `Main` / `SchedulerMain` / GUI is `data/iteration4/iter4_fault_mixed.csv` unless you pass a different path as the first argument.
+Sample inputs: `data/Sample_event_file.csv` (legacy 4-field). Default path for `Main` / `SchedulerMain` / GUI is `data/final_event_file_w26.csv` unless you pass a different path as the first argument. Zone geometry defaults to `data/final_zone_file_w26.csv`.
 
 INPUT FILE FORMAT (supports both):
 - Legacy comma-separated (CSV): Time,Zone ID,Event type,Severity
@@ -65,7 +65,7 @@ Fields:
 Severity is stored as litres: High=30, Moderate=20, Low=10
 Fault defaults for legacy 4-field input: Fault Type=NONE, Fault Target Type=NONE, Fault Target ID=NONE.
 
-ZONE COORDINATES FILE (data/zones.csv):
+ZONE COORDINATES FILE (default `data/final_zone_file_w26.csv`; legacy `data/zones.csv`):
 Zones are rectangular shapes with coordinates in meters. Travel time and distance-based drone selection use this file.
 Format: Zone ID,x1,y1,x2,y2 (header row, then one zone per line)
 * Zone 0 = Base (where drones start and return)

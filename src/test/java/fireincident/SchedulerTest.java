@@ -60,8 +60,9 @@ public class SchedulerTest {
     @Test
     @SuppressWarnings("unchecked")
     public void testSchedulerSelectsClosestIdleDroneForZone() throws Exception {
-        scheduler.updateDroneState(1, DroneState.IDLE.name(), 2);
-        scheduler.updateDroneState(2, DroneState.IDLE.name(), 8);
+        // Positions must exist in default data/final_zone_file_w26.csv (zones 1–5)
+        scheduler.updateDroneState(1, DroneState.IDLE.name(), 1);
+        scheduler.updateDroneState(2, DroneState.IDLE.name(), 5);
 
         Field idleDronesField = Scheduler.class.getDeclaredField("idleDrones");
         idleDronesField.setAccessible(true);
@@ -69,11 +70,12 @@ public class SchedulerTest {
         idleDrones.add(1);
         idleDrones.add(2);
 
-        Method selectBestPushDrone = Scheduler.class.getDeclaredMethod("selectBestPushDrone", int.class);
+        Method selectBestPushDrone = Scheduler.class.getDeclaredMethod("selectBestPushDrone", int.class, int.class);
         selectBestPushDrone.setAccessible(true);
 
-        assertEquals(1, ((Integer) selectBestPushDrone.invoke(scheduler, 3)).intValue());
-        assertEquals(2, ((Integer) selectBestPushDrone.invoke(scheduler, 9)).intValue());
+        int need = 30;
+        assertEquals(1, ((Integer) selectBestPushDrone.invoke(scheduler, 3, need)).intValue());
+        assertEquals(2, ((Integer) selectBestPushDrone.invoke(scheduler, 5, need)).intValue());
     }
     @Test
     public void testHardFaultSetsDroneOffline() {

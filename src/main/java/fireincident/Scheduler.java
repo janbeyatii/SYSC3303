@@ -20,9 +20,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.*;
 
 /**
@@ -73,10 +71,6 @@ public class Scheduler implements Runnable, SchedulerInterface {
     private final boolean udpEnabled;
     private volatile boolean fireIncidentFinished = false;
     private final ZoneConfig zoneConfig;
-    /** From config: wall seconds per simulated second for drones; used only to derive approximate sim times in metrics. */
-    private final double metricsDroneWallTimeScale;
-    private int metricsMinCsvSec = -1;
-    private int metricsMaxCsvSec = -1;
     /** Ensures metrics file + listeners run once per finished run (UDP and in-process). */
     private volatile boolean runCompletionHandled = false;
 
@@ -86,13 +80,18 @@ public class Scheduler implements Runnable, SchedulerInterface {
 
     private long metricsFirstIncidentWallMs = -1;
     private long metricsLastCompletedWallMs = -1;
-    private final Map<String, Long> incidentQueuedWallMs = new HashMap<>();
+    private final Map<String, Long> incidentCreatedWallMs = new HashMap<>();
+    private final java.util.Set<String> incidentArrivedOnce = new HashSet<>();
     private final List<Long> metricsResponseWallMs = new ArrayList<>();
-    private double metricsTotalDispatchDistanceM = 0;
+    private final List<Long> metricsCompletionWallMs = new ArrayList<>();
 
     private final Map<Integer, Long> droneIdleAccumMs = new HashMap<>();
     private final Map<Integer, Long> droneFlightAccumMs = new HashMap<>();
+    private final Map<Integer, Long> droneExtinguishAccumMs = new HashMap<>();
     private final Map<Integer, Long> droneLastTransitionWallMs = new HashMap<>();
+    private long queueSizeLastChangeWallMs = -1;
+    private long queueSizeAreaMs = 0;
+    private int queueMaxSize = 0;
 
     private volatile SimulationMetricsReport lastMetricsReport = SimulationMetricsReport.empty();
 
@@ -105,28 +104,15 @@ public class Scheduler implements Runnable, SchedulerInterface {
      * @param udpEnabled if {@code true}, binds {@link Ports#SCHEDULER} and processes {@link UDPMessage} traffic
      */
     public Scheduler(boolean udpEnabled) {
-        this(udpEnabled, new ZoneConfig(), 1.0);
+        this(udpEnabled, new ZoneConfig());
     }
 
     /**
      * @param zoneConfig used for distance-based drone selection when multiple drones are idle
      */
     public Scheduler(boolean udpEnabled, ZoneConfig zoneConfig) {
-        this(udpEnabled, zoneConfig, 1.0);
-    }
-
-    /**
-     * @param droneWallTimeScaleForMetrics {@link app.SimConfig#getDroneTimeScale()} — wall seconds per simulated second;
-     *                                     used to report approximate simulated mission/response/idle/flight times
-     */
-    public Scheduler(boolean udpEnabled, ZoneConfig zoneConfig, double droneWallTimeScaleForMetrics) {
         this.udpEnabled = udpEnabled;
         this.zoneConfig = zoneConfig != null ? zoneConfig : new ZoneConfig();
-        double ts = droneWallTimeScaleForMetrics > 0 ? droneWallTimeScaleForMetrics : 1.0;
-        if (ts > 1.0) {
-            ts = 1.0;
-        }
-        this.metricsDroneWallTimeScale = ts;
         if (!udpEnabled) {
             return;
         }
@@ -240,6 +226,15 @@ public class Scheduler implements Runnable, SchedulerInterface {
         String key = incidentKeyFromDroneKeyPayload(msg);
         int zoneId = zoneIdFromIncidentKey(key);
         fireLog("[Scheduler] Drone " + droneId + " arrived at zone for " + key);
+        Job job = inProgressByDrone.get(droneId);
+        if (job != null) {
+            noteIncidentArrivalMetrics(job.incident);
+        } else {
+            Job byZone = inProgressByZone.get(zoneId);
+            if (byZone != null && byZone.incident.getKey().equals(key)) {
+                noteIncidentArrivalMetrics(byZone.incident);
+            }
+        }
         updateDroneState(droneId, DroneState.ARRIVED.name(), zoneId);
     }
 
@@ -367,6 +362,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
         int droneId = Integer.parseInt(parts[1].trim());
         recordDroneAddress(droneId, fromAddr, fromPort);
         Incident incident = new Incident(parts[2].trim(), Integer.parseInt(parts[3].trim()), parts[4].trim(), Integer.parseInt(parts[5].trim()));
+        noteIncidentArrivalMetrics(incident);
         fireLog("[Scheduler] Drone " + droneId + " arrived at zone for " + incident.getKey());
         updateDroneState(droneId, DroneState.ARRIVED.name(), incident.getZoneId());
         sendToAddress(DronePacketBuilder.ack(), fromAddr, fromPort);
@@ -552,17 +548,8 @@ public class Scheduler implements Runnable, SchedulerInterface {
         if (metricsFirstIncidentWallMs < 0) {
             metricsFirstIncidentWallMs = now;
         }
-        incidentQueuedWallMs.put(job.incident.getKey(), now);
-        Integer csvSec = parseIncidentTimeToSecondOfDay(job.incident.getTime());
-        if (csvSec != null) {
-            if (metricsMinCsvSec < 0) {
-                metricsMinCsvSec = csvSec;
-                metricsMaxCsvSec = csvSec;
-            } else {
-                metricsMinCsvSec = Math.min(metricsMinCsvSec, csvSec);
-                metricsMaxCsvSec = Math.max(metricsMaxCsvSec, csvSec);
-            }
-        }
+        incidentCreatedWallMs.put(job.incident.getKey(), now);
+        queueSizeBeforeMutation(now);
 
         int zoneId = job.incident.getZoneId();
         int severity = job.incident.getSeverity();
@@ -570,28 +557,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
                 .computeIfAbsent(severity, k -> new LinkedList<>())
                 .addLast(job);
         fifoQueue.addLast(job);
-    }
-
-    /** Parses CSV {@code Time} column (e.g. HH:mm:ss) to second-of-day for scenario span only. */
-    private static Integer parseIncidentTimeToSecondOfDay(String time) {
-        if (time == null || time.isBlank()) return null;
-        String t = time.trim();
-        try {
-            return LocalTime.parse(t).toSecondOfDay();
-        } catch (DateTimeParseException ignored) {
-            String[] p = t.split(":");
-            if (p.length >= 3) {
-                try {
-                    int h = Integer.parseInt(p[0].trim());
-                    int m = Integer.parseInt(p[1].trim());
-                    int s = Integer.parseInt(p[2].trim());
-                    if (h >= 0 && h < 24 && m >= 0 && m < 60 && s >= 0 && s < 60) {
-                        return h * 3600 + m * 60 + s;
-                    }
-                } catch (NumberFormatException ignored2) { }
-            }
-            return null;
-        }
+        queueSizeAfterMutation(now);
     }
 
     private boolean hasAnyPending() {
@@ -626,6 +592,8 @@ public class Scheduler implements Runnable, SchedulerInterface {
     }
 
     private void removeJobFromQueue(Job job) {
+        long now = System.currentTimeMillis();
+        queueSizeBeforeMutation(now);
         int zoneId = job.incident.getZoneId();
         int severity = job.incident.getSeverity();
         Map<Integer, LinkedList<Job>> bySeverity = queuesByZoneAndSeverity.get(zoneId);
@@ -634,15 +602,19 @@ public class Scheduler implements Runnable, SchedulerInterface {
             if (q != null) q.removeFirstOccurrence(job);
         }
         fifoQueue.removeFirstOccurrence(job);
+        queueSizeAfterMutation(now);
     }
 
     private void requeueJob(Job job) {
+        long now = System.currentTimeMillis();
+        queueSizeBeforeMutation(now);
         int zoneId = job.incident.getZoneId();
         int severity = job.incident.getSeverity();
         queuesByZoneAndSeverity.computeIfAbsent(zoneId, k -> new HashMap<>())
                 .computeIfAbsent(severity, k -> new LinkedList<>())
                 .addFirst(job);
         fifoQueue.addFirst(job);
+        queueSizeAfterMutation(now);
     }
 
     /**
@@ -791,20 +763,9 @@ public class Scheduler implements Runnable, SchedulerInterface {
                 droneIdleAccumMs.merge(droneId, delta, Long::sum);
             } else if (DroneState.EN_ROUTE.name().equals(prev) || DroneState.RETURNING.name().equals(prev)) {
                 droneFlightAccumMs.merge(droneId, delta, Long::sum);
+            } else if (DroneState.EXTINGUISHING.name().equals(prev)) {
+                droneExtinguishAccumMs.merge(droneId, delta, Long::sum);
             }
-        }
-    }
-
-    private void noteDispatchDistance(int droneId, Incident incident) {
-        if (incident == null) return;
-        Integer z = droneZoneById.get(droneId);
-        int from = z != null ? z : 0;
-        int to = incident.getZoneId();
-        try {
-            if (zoneConfig.hasZone(from) && zoneConfig.hasZone(to)) {
-                metricsTotalDispatchDistanceM += zoneConfig.getDistanceMeters(from, to);
-            }
-        } catch (Exception ignored) {
         }
     }
 
@@ -812,10 +773,35 @@ public class Scheduler implements Runnable, SchedulerInterface {
         if (incident == null) return;
         long done = System.currentTimeMillis();
         metricsLastCompletedWallMs = done;
-        Long q = incidentQueuedWallMs.remove(incident.getKey());
-        if (q != null) {
-            metricsResponseWallMs.add(Math.max(0, done - q));
+        Long created = incidentCreatedWallMs.remove(incident.getKey());
+        if (created != null) {
+            metricsCompletionWallMs.add(Math.max(0, done - created));
         }
+        incidentArrivedOnce.remove(incident.getKey());
+    }
+
+    private void noteIncidentArrivalMetrics(Incident incident) {
+        if (incident == null) return;
+        String key = incident.getKey();
+        if (!incidentArrivedOnce.add(key)) return;
+        Long created = incidentCreatedWallMs.get(key);
+        if (created == null) return;
+        long arrived = System.currentTimeMillis();
+        metricsResponseWallMs.add(Math.max(0, arrived - created));
+    }
+
+    private void queueSizeBeforeMutation(long now) {
+        if (queueSizeLastChangeWallMs < 0) {
+            queueSizeLastChangeWallMs = now;
+            return;
+        }
+        queueSizeAreaMs += (long) fifoQueue.size() * Math.max(0, now - queueSizeLastChangeWallMs);
+        queueSizeLastChangeWallMs = now;
+    }
+
+    private void queueSizeAfterMutation(long now) {
+        queueMaxSize = Math.max(queueMaxSize, fifoQueue.size());
+        queueSizeLastChangeWallMs = now;
     }
 
     private SimulationMetricsReport buildMetricsReport() {
@@ -823,28 +809,55 @@ public class Scheduler implements Runnable, SchedulerInterface {
         if (metricsFirstIncidentWallMs >= 0 && metricsLastCompletedWallMs >= metricsFirstIncidentWallMs) {
             mission = metricsLastCompletedWallMs - metricsFirstIncidentWallMs;
         }
-        int n = metricsResponseWallMs.size();
-        double avgResp = 0;
-        if (n > 0) {
-            long sum = 0;
-            for (Long v : metricsResponseWallMs) sum += v;
-            avgResp = (double) sum / n;
+        long now = System.currentTimeMillis();
+        if (queueSizeLastChangeWallMs >= 0) {
+            queueSizeAreaMs += (long) fifoQueue.size() * Math.max(0, now - queueSizeLastChangeWallMs);
+            queueSizeLastChangeWallMs = now;
         }
-        int droneCount = Math.max(1, droneIdleAccumMs.size());
-        long idleSum = 0;
-        for (Long v : droneIdleAccumMs.values()) idleSum += v;
-        double avgIdle = (double) idleSum / droneCount;
-        int flightDroneCount = Math.max(1, droneFlightAccumMs.size());
-        long flightSum = 0;
-        for (Long v : droneFlightAccumMs.values()) flightSum += v;
-        double avgFlight = (double) flightSum / flightDroneCount;
-        int csvSpan = -1;
-        if (metricsMinCsvSec >= 0 && metricsMaxCsvSec >= metricsMinCsvSec) {
-            csvSpan = metricsMaxCsvSec - metricsMinCsvSec;
+        for (Integer droneId : new HashSet<>(droneStateById.keySet())) {
+            recordDroneStateSegmentEnd(droneId);
+            droneLastTransitionWallMs.put(droneId, now);
         }
+
+        int responseN = metricsResponseWallMs.size();
+        long responseSum = 0;
+        long maxResponse = 0;
+        for (Long v : metricsResponseWallMs) {
+            responseSum += v;
+            if (v > maxResponse) maxResponse = v;
+        }
+        double avgResp = responseN > 0 ? (double) responseSum / responseN : 0.0;
+
+        int completionN = metricsCompletionWallMs.size();
+        long completionSum = 0;
+        long maxCompletion = 0;
+        for (Long v : metricsCompletionWallMs) {
+            completionSum += v;
+            if (v > maxCompletion) maxCompletion = v;
+        }
+        double avgCompletion = completionN > 0 ? (double) completionSum / completionN : 0.0;
+
+        HashMap<Integer, Double> utilizationByDrone = new HashMap<>();
+        long denom = mission > 0 ? mission : 1;
+        for (Integer droneId : droneStateById.keySet()) {
+            long flight = droneFlightAccumMs.getOrDefault(droneId, 0L);
+            long servicing = droneExtinguishAccumMs.getOrDefault(droneId, 0L);
+            long active = flight + servicing;
+            double pct = Math.max(0.0, Math.min(100.0, (active * 100.0) / denom));
+            utilizationByDrone.put(droneId, pct);
+        }
+
+        double avgQueueLen = mission > 0 ? (double) queueSizeAreaMs / mission : 0.0;
         return new SimulationMetricsReport(
-                mission, n, avgResp, metricsTotalDispatchDistanceM, avgIdle, avgFlight,
-                metricsDroneWallTimeScale, csvSpan);
+                mission,
+                completionN,
+                avgResp,
+                maxResponse,
+                avgCompletion,
+                maxCompletion,
+                utilizationByDrone,
+                avgQueueLen,
+                queueMaxSize);
     }
 
     private void writeMetricsToFile(SimulationMetricsReport r) {
@@ -853,7 +866,11 @@ public class Scheduler implements Runnable, SchedulerInterface {
             Files.createDirectories(dir);
             String stamp = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").format(LocalDateTime.now());
             Path file = dir.resolve("simulation-metrics-" + stamp + "-" + System.currentTimeMillis() + ".txt");
-            List<Integer> ids = SimulationMetricsReport.sortedIds(droneIdleAccumMs.keySet());
+            HashSet<Integer> metricIds = new HashSet<>();
+            metricIds.addAll(droneIdleAccumMs.keySet());
+            metricIds.addAll(droneFlightAccumMs.keySet());
+            metricIds.addAll(droneExtinguishAccumMs.keySet());
+            List<Integer> ids = SimulationMetricsReport.sortedIds(metricIds);
             String body = r.toDetailedString(ids) + "\n" + r.toLogString() + "\n";
             Files.writeString(file, body, StandardCharsets.UTF_8, StandardOpenOption.CREATE);
             fireLog("[Scheduler] Wrote metrics: " + file.toAbsolutePath());
@@ -899,7 +916,6 @@ public class Scheduler implements Runnable, SchedulerInterface {
     }
 
     private void fireIncidentDispatched(int droneId, Incident incident) {
-        noteDispatchDistance(droneId, incident);
         for (SchedulerListener l : listeners) l.onIncidentDispatched(droneId, incident);
     }
 
@@ -1013,6 +1029,7 @@ public class Scheduler implements Runnable, SchedulerInterface {
     /** In-process path: drone arrived at zone. */
     public synchronized void reportArrival(int droneId, Incident incident) {
         fireLog("[Scheduler] Drone " + droneId + " arrived at zone " + incident.getZoneId());
+        noteIncidentArrivalMetrics(incident);
         updateDroneState(droneId, DroneState.ARRIVED.name(), incident.getZoneId());
     }
 
@@ -1062,14 +1079,17 @@ public class Scheduler implements Runnable, SchedulerInterface {
         droneAgentCapacityById.clear();
         metricsFirstIncidentWallMs = -1;
         metricsLastCompletedWallMs = -1;
-        incidentQueuedWallMs.clear();
+        incidentCreatedWallMs.clear();
+        incidentArrivedOnce.clear();
         metricsResponseWallMs.clear();
-        metricsTotalDispatchDistanceM = 0;
+        metricsCompletionWallMs.clear();
         droneIdleAccumMs.clear();
         droneFlightAccumMs.clear();
+        droneExtinguishAccumMs.clear();
         droneLastTransitionWallMs.clear();
-        metricsMinCsvSec = -1;
-        metricsMaxCsvSec = -1;
+        queueSizeLastChangeWallMs = -1;
+        queueSizeAreaMs = 0;
+        queueMaxSize = 0;
         runCompletionHandled = false;
         lastMetricsReport = SimulationMetricsReport.empty();
         idleDrones.clear();

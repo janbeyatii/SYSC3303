@@ -20,7 +20,7 @@ import javax.swing.*;
  */
 public class SchedulerMain {
 
-    private static final String DEFAULT_CSV = "data/iteration4/iter4_fault_mixed.csv";
+    private static final String DEFAULT_CSV = "data/final_event_file_w26.csv";
 
     public static void main(String[] args) {
         String csvPath = (args != null && args.length > 0 && args[0] != null && !args[0].isEmpty())
@@ -29,7 +29,7 @@ public class SchedulerMain {
 
         SimConfig config = new SimConfig();
 
-        Scheduler scheduler = new Scheduler(true, new ZoneConfig(), config.getDroneTimeScale());
+        Scheduler scheduler = new Scheduler(true, new ZoneConfig());
         Thread schedulerThread = new Thread(scheduler, "Scheduler");
         schedulerThread.setDaemon(true);
         schedulerThread.start();

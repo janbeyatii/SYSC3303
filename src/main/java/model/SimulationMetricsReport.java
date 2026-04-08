@@ -1,50 +1,42 @@
 package model;
 
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
-/**
- * Performance snapshot for Iteration 5: wall-clock timings, approximate simulated times
- * (using configured drone wall-time scale), dispatch distance, and CSV event-time span.
- */
+/** Final demo performance metrics computed from wall-clock milliseconds. */
 public final class SimulationMetricsReport {
     private final long missionWallMs;
-    private final int incidentsCompleted;
+    private final int eventsCompleted;
     private final double avgResponseWallMs;
-    private final double totalDispatchDistanceMeters;
-    private final double avgIdleWallMsPerDrone;
-    private final double avgFlightWallMsPerDrone;
-    /** missionWallMs/1000/scale — approximates simulated mission duration if drone sleeps use this scale. */
-    private final double approxMissionSimSeconds;
-    private final double approxAvgResponseSimSeconds;
-    private final double approxAvgIdleSimSeconds;
-    private final double approxAvgFlightSimSeconds;
-    /** Seconds between latest and earliest parsed CSV Time column in the run; -1 if unavailable. */
-    private final int scenarioCsvTimeSpanSeconds;
-    private final double droneWallTimeScaleUsed;
+    private final long maxResponseWallMs;
+    private final double avgCompletionWallMs;
+    private final long maxCompletionWallMs;
+    private final Map<Integer, Double> droneUtilizationPctByDroneId;
+    private final double avgQueueLength;
+    private final int maxQueueLength;
 
     public SimulationMetricsReport(
             long missionWallMs,
-            int incidentsCompleted,
+            int eventsCompleted,
             double avgResponseWallMs,
-            double totalDispatchDistanceMeters,
-            double avgIdleWallMsPerDrone,
-            double avgFlightWallMsPerDrone,
-            double droneWallTimeScale,
-            int scenarioCsvTimeSpanSeconds) {
+            long maxResponseWallMs,
+            double avgCompletionWallMs,
+            long maxCompletionWallMs,
+            Map<Integer, Double> droneUtilizationPctByDroneId,
+            double avgQueueLength,
+            int maxQueueLength) {
         this.missionWallMs = missionWallMs;
-        this.incidentsCompleted = incidentsCompleted;
+        this.eventsCompleted = eventsCompleted;
         this.avgResponseWallMs = avgResponseWallMs;
-        this.totalDispatchDistanceMeters = totalDispatchDistanceMeters;
-        this.avgIdleWallMsPerDrone = avgIdleWallMsPerDrone;
-        this.avgFlightWallMsPerDrone = avgFlightWallMsPerDrone;
-        double ts = droneWallTimeScale > 0 ? droneWallTimeScale : 1.0;
-        this.droneWallTimeScaleUsed = ts;
-        this.scenarioCsvTimeSpanSeconds = scenarioCsvTimeSpanSeconds;
-        this.approxMissionSimSeconds = (missionWallMs / 1000.0) / ts;
-        this.approxAvgResponseSimSeconds = (avgResponseWallMs / 1000.0) / ts;
-        this.approxAvgIdleSimSeconds = (avgIdleWallMsPerDrone / 1000.0) / ts;
-        this.approxAvgFlightSimSeconds = (avgFlightWallMsPerDrone / 1000.0) / ts;
+        this.maxResponseWallMs = maxResponseWallMs;
+        this.avgCompletionWallMs = avgCompletionWallMs;
+        this.maxCompletionWallMs = maxCompletionWallMs;
+        this.droneUtilizationPctByDroneId = Collections.unmodifiableMap(
+                new LinkedHashMap<>(droneUtilizationPctByDroneId == null ? Map.of() : droneUtilizationPctByDroneId));
+        this.avgQueueLength = avgQueueLength;
+        this.maxQueueLength = maxQueueLength;
     }
 
     public long missionWallMs() {
@@ -52,93 +44,81 @@ public final class SimulationMetricsReport {
     }
 
     public int incidentsCompleted() {
-        return incidentsCompleted;
+        return eventsCompleted;
+    }
+
+    public int eventsCompleted() {
+        return eventsCompleted;
     }
 
     public double avgResponseWallMs() {
         return avgResponseWallMs;
     }
 
-    public double totalDispatchDistanceMeters() {
-        return totalDispatchDistanceMeters;
+    public long maxResponseWallMs() {
+        return maxResponseWallMs;
     }
 
-    public double avgIdleWallMsPerDrone() {
-        return avgIdleWallMsPerDrone;
+    public double avgCompletionWallMs() {
+        return avgCompletionWallMs;
     }
 
-    public double avgFlightWallMsPerDrone() {
-        return avgFlightWallMsPerDrone;
+    public long maxCompletionWallMs() {
+        return maxCompletionWallMs;
     }
 
-    public double approxMissionSimSeconds() {
-        return approxMissionSimSeconds;
+    public Map<Integer, Double> droneUtilizationPctByDroneId() {
+        return droneUtilizationPctByDroneId;
     }
 
-    public double approxAvgResponseSimSeconds() {
-        return approxAvgResponseSimSeconds;
+    public double avgQueueLength() {
+        return avgQueueLength;
     }
 
-    public double approxAvgIdleSimSeconds() {
-        return approxAvgIdleSimSeconds;
-    }
-
-    public double approxAvgFlightSimSeconds() {
-        return approxAvgFlightSimSeconds;
-    }
-
-    public int scenarioCsvTimeSpanSeconds() {
-        return scenarioCsvTimeSpanSeconds;
-    }
-
-    public double droneWallTimeScaleUsed() {
-        return droneWallTimeScaleUsed;
+    public int maxQueueLength() {
+        return maxQueueLength;
     }
 
     public String toLogString() {
         return String.format(
-                "missionWallMs=%d approxMissionSimS=%.2f completed=%d avgResponseMs=%.1f avgResponseSimS=%.2f totalDispatchM=%.1f avgIdleMsPerDrone=%.1f avgFlightMsPerDrone=%.1f csvTimeSpanS=%d scale=%.4f",
-                missionWallMs, approxMissionSimSeconds, incidentsCompleted, avgResponseWallMs, approxAvgResponseSimSeconds,
-                totalDispatchDistanceMeters, avgIdleWallMsPerDrone, avgFlightWallMsPerDrone,
-                scenarioCsvTimeSpanSeconds, droneWallTimeScaleUsed);
+                "missionWallMs=%d eventsCompleted=%d avgResponseMs=%.1f maxResponseMs=%d avgCompletionMs=%.1f maxCompletionMs=%d avgQueueLen=%.2f maxQueueLen=%d",
+                missionWallMs, eventsCompleted, avgResponseWallMs, maxResponseWallMs, avgCompletionWallMs,
+                maxCompletionWallMs, avgQueueLength, maxQueueLength);
     }
 
     public String toDetailedString(List<Integer> droneIds) {
         StringBuilder sb = new StringBuilder();
-        sb.append("=== Simulation performance ===\n");
-        sb.append("(Wall times are measured on the machine; approx simulated s = wall s / droneTimeScale from config.)\n");
-        sb.append(String.format("Drone time scale used: %.6f (from data/config.properties)\n", droneWallTimeScaleUsed));
-        sb.append(String.format("Mission wall time (first queued → last completed): %d ms (%.2f s)\n",
+        sb.append("=== Performance metrics (wall-clock) ===\n");
+        sb.append("All measurements use wall-clock milliseconds and are computed at simulation end.\n");
+        sb.append(String.format("Run duration (first event queued -> last event completed): %d ms (%.2f s)\n",
                 missionWallMs, missionWallMs / 1000.0));
-        sb.append(String.format("Approx. mission simulated time (wall / scale): %.2f s\n", approxMissionSimSeconds));
-        if (scenarioCsvTimeSpanSeconds >= 0) {
-            sb.append(String.format("CSV Time column span (max−min parsed times in this run): %d s\n",
-                    scenarioCsvTimeSpanSeconds));
-        } else {
-            sb.append("CSV Time column span: n/a (could not parse times)\n");
-        }
-        sb.append(String.format("Incidents completed: %d\n", incidentsCompleted));
-        if (incidentsCompleted > 0) {
-            sb.append(String.format("Avg response wall (scheduler received incident → completed): %.1f ms (%.2f s)\n",
+        sb.append(String.format("Events completed: %d\n", eventsCompleted));
+        if (eventsCompleted > 0) {
+            sb.append(String.format("1) Average event response time (created -> first arrival): %.1f ms (%.2f s)\n",
                     avgResponseWallMs, avgResponseWallMs / 1000.0));
-            sb.append(String.format("Avg response approx. sim: %.2f s\n", approxAvgResponseSimSeconds));
-            sb.append("(Detect instant for that metric = when the scheduler enqueues the incident, i.e. UDP/FIS delivery.)\n");
+            sb.append(String.format("2) Maximum event response time: %d ms (%.2f s)\n",
+                    maxResponseWallMs, maxResponseWallMs / 1000.0));
+            sb.append(String.format("3) Average event completion time (created -> completed): %.1f ms (%.2f s)\n",
+                    avgCompletionWallMs, avgCompletionWallMs / 1000.0));
+            sb.append(String.format("4) Maximum event completion time: %d ms (%.2f s)\n",
+                    maxCompletionWallMs, maxCompletionWallMs / 1000.0));
         }
-        sb.append(String.format("Total dispatch distance (assigned legs, zone center→incident): %.1f m\n",
-                totalDispatchDistanceMeters));
-        sb.append(String.format("Avg drone idle (IDLE state) wall: %.1f ms | approx. sim: %.2f s\n",
-                avgIdleWallMsPerDrone, approxAvgIdleSimSeconds));
-        sb.append(String.format("Avg drone flight (EN_ROUTE+RETURNING) wall: %.1f ms | approx. sim: %.2f s\n",
-                avgFlightWallMsPerDrone, approxAvgFlightSimSeconds));
-        if (droneIds != null && !droneIds.isEmpty()) {
-            sb.append("Drones in sample: ").append(droneIds).append("\n");
+        sb.append("5) Drone utilization per drone (active = travelling + servicing):\n");
+        List<Integer> idsToShow = droneIds;
+        if (idsToShow == null || idsToShow.isEmpty()) {
+            idsToShow = sortedIds(droneUtilizationPctByDroneId.keySet());
         }
-        sb.append("Operational goal: minimize mission time, response time, and dispatch distance.\n");
+        for (Integer id : idsToShow) {
+            double pct = droneUtilizationPctByDroneId.getOrDefault(id, 0.0);
+            sb.append(String.format("   Drone %d: %.1f%%\n", id, pct));
+        }
+        sb.append(String.format("6) Average queue length (optional): %.2f\n", avgQueueLength));
+        sb.append(String.format("7) Maximum queue length (optional): %d\n", maxQueueLength));
         return sb.toString();
     }
 
     public static SimulationMetricsReport empty() {
-        return new SimulationMetricsReport(0, 0, 0, 0, 0, 0, 1.0, -1);
+        return new SimulationMetricsReport(0, 0, 0, 0, 0, 0, Map.of(), 0, 0);
     }
 
     public static List<Integer> sortedIds(java.util.Collection<Integer> ids) {

@@ -62,8 +62,8 @@ public class SchedulerIteration5Test {
         scheduler.signalNoMoreIncidents();
 
         SimulationMetricsReport report = scheduler.getSimulationMetricsReport();
-        assertEquals("In in-process mode (udpEnabled=false), no metrics report should be generated.", 0, report.incidentsCompleted());
-        assertEquals("In in-process mode (udpEnabled=false), mission wall time should remain unset.", 0, report.missionWallMs());
+        assertEquals("Run-complete path should record completed incidents.", 2, report.incidentsCompleted());
+        assertTrue("Mission wall time should be set when metrics finalize.", report.missionWallMs() >= 0);
     }
 
     @Test

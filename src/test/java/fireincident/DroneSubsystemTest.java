@@ -65,7 +65,7 @@ public class DroneSubsystemTest {
         });
 
         Incident incident1 = new Incident("14:03:15", 3, "FIRE_DETECTED", 30);
-        Incident incident2 = new Incident("14:10:00", 7, "FIRE_DETECTED", 20);
+        Incident incident2 = new Incident("14:10:00", 4, "FIRE_DETECTED", 20);
         scheduler.receiveIncident(incident1, completed -> completionLatch.countDown());
         scheduler.receiveIncident(incident2, completed -> completionLatch.countDown());
 

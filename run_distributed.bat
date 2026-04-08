@@ -5,10 +5,10 @@ REM Launches Scheduler, Drone(s), and Fire Incident as separate processes.
 REM Usage:
 REM   run_distributed.bat [incidentCsvPath]
 REM Example:
-REM   run_distributed.bat data/iteration4/iter4_fault_mixed.csv
+REM   run_distributed.bat data/final_event_file_w26.csv
 
 set "INCIDENT_CSV=%~1"
-if "%INCIDENT_CSV%"=="" set "INCIDENT_CSV=data/iteration4/iter4_fault_mixed.csv"
+if "%INCIDENT_CSV%"=="" set "INCIDENT_CSV=data/final_event_file_w26.csv"
 
 set "CONFIG_FILE=data/config.properties"
 set "NUM_DRONES=10"

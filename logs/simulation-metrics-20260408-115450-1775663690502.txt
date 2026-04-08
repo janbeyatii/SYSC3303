@@ -1,0 +1,15 @@
+=== Performance metrics (wall-clock) ===
+All measurements use wall-clock milliseconds and are computed at simulation end.
+Run duration (first event queued -> last event completed): 0 ms (0.00 s)
+Events completed: 2
+1) Average event response time (created -> first arrival): 0.0 ms (0.00 s)
+2) Maximum event response time: 0 ms (0.00 s)
+3) Average event completion time (created -> completed): 0.0 ms (0.00 s)
+4) Maximum event completion time: 0 ms (0.00 s)
+5) Drone utilization per drone (active = travelling + servicing):
+   Drone 1: 0.0%
+   Drone 2: 0.0%
+6) Average queue length (optional): 0.00
+7) Maximum queue length (optional): 2
+
+missionWallMs=0 eventsCompleted=2 avgResponseMs=0.0 maxResponseMs=0 avgCompletionMs=0.0 maxCompletionMs=0 avgQueueLen=0.00 maxQueueLen=2
